@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 node_modules/
+
+# MCP server deps
+mcp-server/node_modules/

@@ -1,0 +1,19 @@
+{
+  "name": "stl-supabase-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that gives a STLFLIX collaborator their own database on the ops self-hosted Supabase, and nothing else.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
