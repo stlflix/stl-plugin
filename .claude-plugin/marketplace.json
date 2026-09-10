@@ -1,0 +1,16 @@
+{
+  "name": "stlflix",
+  "owner": { "name": "Lucas Melo", "email": "lucasstlflix@gmail.com" },
+  "metadata": {
+    "description": "STLFLIX Claude Code plugins",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "stl-plugin",
+      "source": "./",
+      "description": "STLFLIX development process: CLAUDE.md defaults, MCPs, process skills and design system.",
+      "category": "productivity"
+    }
+  ]
+}

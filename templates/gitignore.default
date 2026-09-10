@@ -1,0 +1,69 @@
+# --- STLFLIX default .gitignore (installed by /stl-plugin:stl-project-init) ---
+
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Secrets — every spelling. `!.env.example` keeps the documented template.
+.env
+.env.*
+*.env
+.env*.local
+.env*.bak*
+.env.*.bak*
+*.pem
+*.key
+*.p12
+*.secret
+!.env.example
+!.env.template
+
+# Build output
+.next/
+out/
+dist/
+build/
+.turbo/
+.vercel/
+.output/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Supabase local stack
+supabase/.temp/
+supabase/.branches/
+
+# Tests and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.eslintcache
+.cache/
+
+# Logs and dumps
+*.log
+logs/
+*.dump
+*.sql.gz
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local state (personal, never shared)
+.claude/settings.local.json
+graphify-out/
+
+# Scratch
+tmp/
+*.tmp

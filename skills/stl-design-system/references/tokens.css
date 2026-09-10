@@ -1,0 +1,208 @@
+/* Design tokens as CSS custom properties.
+   Mirror of tokens.ts — keep both in sync.
+
+   Contrast pass (AD-00X): the neutral ladder, the hairlines and the semantic
+   text colours were re-derived for legibility. Dark-mode absolutes are MEASURED
+   on the Replit reference (docs/ui-reference/replit-dark.png); semantic hues are
+   the original measured anchors with lightness moved until the pair
+   (text ⨯ surface) clears WCAG AA — hue and saturation are untouched. */
+:root {
+  color-scheme: light;
+
+  /* neutrals (PRD RT09 — #ffffff page mandated; the recessed steps widened
+     from 5/8 to 11/21 RGB so grouping columns and hover actually read).
+     --canvas is the page itself; --background is the RAISED surface (card,
+     dropdown, dialog). The light ladder below is Lucas's hand tuning: the four
+     steps are near-white and the order is INVERTED against the dark theme —
+     the grouping surface is the brightest and the card sits a hair under the
+     page. It is a deliberate override of the measured proposal (AD-010,
+     primeira emenda); the dark ladder keeps recess → page → surface → hover. */
+  --canvas: #fcfcfc;
+  --background: #fdfdfd;
+  --sub-bg: #ffffff;
+  --selected: #ffffff;
+  --ink: #252525; /* 15.1:1 on --background (was #3d3d3d, 10.9:1) */
+  --muted: #6e7074; /* 4.96:1 — AA (was #aeaeae, 2.2:1, failed) */
+
+  /* hairlines — theme-reactive borders (replace black/[x]) */
+  --line: rgba(64, 64, 64, 0.107); /* composites to #e9e9e9, 1.19:1 */
+  --line-strong: rgba(0, 0, 0, 0.26); /* composites to #bdbdbd */
+  --header-bg: rgba(255, 255, 255, 0.9);
+
+  /* skeleton shimmer highlight (moving sheen over --selected) */
+  --skeleton-sheen: rgba(255, 255, 255, 0.7);
+
+  /* scrollbars — thin translucent thumb (Linear-style) */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.26);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.42);
+
+  /* brand (STLFLIX logo blue) — constant across themes by PRD RT11 */
+  --primary: #4169e1;
+  --primary-dark: #2e3f9e;
+
+  /* semantic (measured on dash-ref-01; text steps darkened to clear AA both
+     on --background and on their own -soft panel) */
+  --success: #28674c;
+  --success-accent: #2e9e6b;
+  --success-soft: #e6f8ee;
+  --danger: #c92c42;
+  --danger-accent: #ea8593;
+  --danger-soft: #ffe9ec;
+  --warning: #906710;
+  --warning-accent: #ffe280;
+  --warning-soft: #fff3d6;
+  --info: #2a66d4;
+  --info-accent: #93bffc;
+  --info-soft: #e8f0fe;
+  --purple: #6d3fb8;
+  --purple-accent: #c5bcf2;
+  --purple-soft: #efeafc;
+
+  /* AI gradient (measured on dash-ref-02) — the only sanctioned gradient
+     besides the skeleton sheen; reserved for AI-facing surfaces. */
+  --ai-from: #e5aeff;
+  --ai-via: #ff8fb6;
+  --ai-to: #ffbc97;
+  --ai-gradient: linear-gradient(
+    135deg,
+    var(--ai-from) 0%,
+    var(--ai-via) 50%,
+    var(--ai-to) 100%
+  );
+
+  /* pastel tags (measured on dash-ref-03) — filled chips that carry their own
+     dark ink, so they do NOT flip with the theme */
+  --tag-cyan: #a2e1f5;
+  --tag-blue: #a3d0fc;
+  --tag-purple: #c5bcf2;
+  --tag-amber: #ffe7b2;
+
+  /* text hierarchy — 4 levels, each a visible step apart
+     18.4 : 12.1 : 5.0 : 2.7 (contrast on --background) */
+  --text-primary: #131416;
+  --text-secondary: #34363a;
+  --text-tertiary: #6e7074;
+  --text-quaternary: #9b9da2;
+
+  /* borders — Linear hairline signature (translucent black) */
+  --border-hairline: 0.5px;
+  --border-translucent: #0000001a;
+  --border-translucent-strong: #00000029;
+
+  /* radii (Linear scale: 4·6·8·12·16·24·32) */
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-24: 24px;
+  --radius-32: 32px;
+  --radius-card: 0.5rem; /* = 8px, rounded surfaces */
+  --radius-field: 0.375rem; /* = 6px, inputs/buttons/chips */
+  --radius-circle: 9999px; /* avatars and status dots only */
+
+  /* elevation (Linear shadows — black-alpha, theme-neutral) */
+  --shadow-tiny: 0px 0px 0px transparent;
+  --shadow-low: 0px 2px 4px #0000001a;
+  --shadow-medium: 0px 4px 24px #00000030;
+  --shadow-high: 0px 7px 32px #00000059;
+  /* real product-card elevation measured on Linear's board (3-layer) */
+  --shadow-card: 0 0 0 0.5px #0000001f, 0 4px 4px -1px #0000000f,
+    0 1px 1px 0 #00000014;
+  /* real modal elevation measured on Linear's "New issue" dialog (3-layer) */
+  --shadow-dialog: 0 9px 48px #00000014, 0 6px 24px #0000001a,
+    0 1px 1px 0 #0000000a;
+  --shadow-stack-low: 0px 8px 2px 0px #0000, 0px 5px 2px 0px #00000003,
+    0px 3px 2px 0px #0000000a, 0px 1px 1px 0px #00000012,
+    0px 0px 1px 0px #00000014;
+
+  /* motion — Linear speeds + easing library */
+  --speed-quick: 0.1s;
+  --speed-regular: 0.25s;
+  --speed-highlight: 0.15s;
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-out-circ: cubic-bezier(0.075, 0.82, 0.165, 1);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-in-out-quint: cubic-bezier(0.86, 0, 0.07, 1);
+
+  /* typography — Inter optical weights (Linear: not 500/600/700) */
+  --font-weight-normal: 400;
+  --font-weight-medium: 510;
+  --font-weight-semibold: 590;
+  --font-weight-bold: 680;
+}
+
+/* ————————————————————————————————————————————————————————————
+   Dark theme — ladder MEASURED on the Replit reference by pixel sampling
+   (canvas #1c1c1d, raised surface #212223, sidebar #1f1f20, divider #272829,
+   body text #e6e7e7, muted #a6a7aa, placeholder #7f8184).
+   Toggled by `.dark` on <html>.
+
+   Two changes vs the previous Linear-derived ladder:
+   1. the whole base moves up out of near-black (#070707/#0f1010 → #121213/#1c1c1d),
+      so borders and elevation have something to read against;
+   2. the semantic families now FLIP. They used to be constant hex, which left
+      `text-success` at 2.5:1 and `bg-danger-soft` as a glaring pale block on a
+      black page. Only brand stays constant (PRD RT11).
+   ———————————————————————————————————————————————————————————— */
+.dark {
+  color-scheme: dark;
+
+  /* neutrals — 4 steps: recess → page → raised surface → hover.
+     The page used to BE --background, so a card, a dropdown and the page behind
+     them were all the same colour and depth came from a 8%-white hairline alone. */
+  --sub-bg: #121213; /* recessed — sidebar, grouping columns/sections */
+  --canvas: #171718; /* the page itself */
+  --background: #1c1c1d; /* raised — card, dropdown, dialog (Replit canvas) */
+  --selected: #292a2b; /* hover/selected row */
+  --ink: #f2f3f3; /* text-primary, 15.3:1 */
+  --muted: #a9aaae; /* text-tertiary, 7.3:1 (was #97989a) */
+
+  /* hairlines invert to translucent white; composites to #2f2f30 on
+     --background (1.27:1), a shade over the measured Replit divider #272829 */
+  --line: rgba(255, 255, 255, 0.084);
+  --line-strong: rgba(255, 255, 255, 0.22);
+  --header-bg: rgba(28, 28, 29, 0.8);
+
+  /* shimmer sheen is subtle white on dark surfaces */
+  --skeleton-sheen: rgba(255, 255, 255, 0.09);
+
+  /* scrollbar thumb inverts to translucent white on dark */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.26);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.42);
+
+  /* semantic — same hue and saturation as the light anchors, lightness moved
+     until text ⨯ surface clears 6.5:1 on both --background and -soft */
+  --success: #54bd90;
+  --success-soft: #0f2b1f;
+  --danger: #e58895;
+  --danger-soft: #33161b;
+  --warning: #e2a219;
+  --warning-soft: #33270e;
+  --info: #88a9e7;
+  --info-soft: #15243d;
+  --purple: #b39adc;
+  --purple-soft: #241d3d;
+
+  /* text hierarchy — 16.5 : 11.7 : 7.3 : 4.3 */
+  --text-primary: #fbfbfc;
+  --text-secondary: #d5d6d8;
+  --text-tertiary: #a9aaae;
+  --text-quaternary: #7e8083;
+
+  --border-translucent: #ffffff1a;
+  --border-translucent-strong: #ffffff29;
+
+  /* elevation — on dark: white ring + deep black drop (Linear approach) */
+  --shadow-low: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-medium: 0 4px 24px rgba(0, 0, 0, 0.5);
+  --shadow-high: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 4px 8px -2px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 12px 48px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.45);
+}
