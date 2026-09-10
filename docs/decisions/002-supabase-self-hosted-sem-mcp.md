@@ -1,6 +1,6 @@
 # 002 — Supabase self-hosted entra pela CLI, não por MCP
 
-**Status:** aceito · **Data:** 2026-09-09
+**Status:** substituído por [005](005-mcp-proprio-para-o-supabase-do-ops.md) · **Data:** 2026-09-09
 
 ## Contexto
 O pedido era OAuth 2.0 para GitHub, Supabase self-hosted e Vercel. O único MCP do

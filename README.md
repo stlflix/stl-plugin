@@ -29,6 +29,7 @@ latest handoff of the project you open.
 | MCP `github` | `.mcp.json` | OAuth 2.0 remote server (`api.githubcopilot.com/mcp/`) |
 | MCP `vercel` | `.mcp.json` | OAuth 2.0 remote server (`mcp.vercel.com`) |
 | MCP `firecrawl` | `.mcp.json` | web search + scrape; key via `userConfig` (Keychain) |
+| MCP `supabase` | `.mcp.json` | your own database on the ops self-hosted Supabase; bearer token via `userConfig` |
 | hook `SessionStart` | `hooks/hooks.json` → `scripts/session-start.sh` | setup nudges + last handoff |
 | `stl-setup` | `skills/` | global onboarding (once per machine) |
 | `stl-project-init` | `skills/` | first steps per repository |
@@ -40,11 +41,14 @@ latest handoff of the project you open.
 | `atomic-commit` | `skills/` | Conventional Commits, one change per commit, never on `main` |
 | `session-handoff` | `skills/` | linear `docs/handoff/NNN-date-slug.md` per session |
 | `stl-design-system` | `skills/` | tokens, rules and primitive catalogue (snapshot of the platform) |
+| `mcp-server` | `mcp-server/` | the MCP server behind the ops Supabase (deployed, not shipped to collaborators) |
 | templates | `templates/` | `CLAUDE.global.md`, `CLAUDE.project.md`, `gitignore.default`, `handoff.md` |
 
-Supabase self-hosted is **not** an MCP here — the hosted Supabase MCP is cloud-only.
-Collaborators use the `supabase` CLI with the project's `.env` (see
-`docs/decisions/002-supabase-self-hosted-sem-mcp.md`).
+Supabase self-hosted is reached through **our own** MCP server (`mcp-server/`), not
+the hosted Supabase MCP, which is cloud-only. Each collaborator gets one database and
+a bearer token; every query runs as their own Postgres role, so the isolation is the
+database's, not our code's, and the connection string never leaves the server (see
+`docs/decisions/005-mcp-proprio-para-o-supabase-do-ops.md`).
 
 ## Maintain (Lucas)
 
