@@ -1,12 +1,22 @@
 {
   "name": "stl-plugin",
   "displayName": "STLFLIX Dev Process",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "STLFLIX development process for collaborators: global CLAUDE.md, MCP connections (GitHub, Vercel, Firecrawl), process skills (spec-driven, atomic commits, green gate, handoff, security) and the product-ops design system.",
-  "author": { "name": "Lucas Melo", "email": "lucasstlflix@gmail.com" },
+  "author": {
+    "name": "Lucas Melo",
+    "email": "lucasstlflix@gmail.com"
+  },
   "repository": "https://github.com/stlflix/stl-plugin",
   "license": "UNLICENSED",
-  "keywords": ["stlflix", "process", "spec-driven", "design-system", "supabase", "vercel"],
+  "keywords": [
+    "stlflix",
+    "process",
+    "spec-driven",
+    "design-system",
+    "supabase",
+    "vercel"
+  ],
   "userConfig": {
     "firecrawl_api_key": {
       "type": "string",
@@ -14,6 +24,13 @@
       "description": "Key from https://www.firecrawl.dev/app/api-keys. Powers the firecrawl MCP (search + scrape). Stored in the Keychain.",
       "sensitive": true,
       "required": true
+    },
+    "supabase_ops_token": {
+      "type": "string",
+      "title": "Supabase ops MCP token",
+      "description": "Bearer token issued by Lucas (issue-token.sh). Scopes the supabase MCP to your own database on the ops self-hosted Supabase. Stored in the Keychain.",
+      "sensitive": true,
+      "required": false
     }
   }
 }

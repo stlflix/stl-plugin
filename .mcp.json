@@ -3,8 +3,13 @@
     "firecrawl": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "firecrawl-mcp"],
-      "env": { "FIRECRAWL_API_KEY": "${user_config.firecrawl_api_key}" }
+      "args": [
+        "-y",
+        "firecrawl-mcp"
+      ],
+      "env": {
+        "FIRECRAWL_API_KEY": "${user_config.firecrawl_api_key}"
+      }
     },
     "github": {
       "type": "http",
@@ -13,6 +18,13 @@
     "vercel": {
       "type": "http",
       "url": "https://mcp.vercel.com"
+    },
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp-ops.stlflix.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.supabase_ops_token}"
+      }
     }
   }
 }
