@@ -29,7 +29,7 @@ latest handoff of the project you open.
 | MCP `github` | `.mcp.json` | OAuth 2.0 remote server (`api.githubcopilot.com/mcp/`) |
 | MCP `vercel` | `.mcp.json` | OAuth 2.0 remote server (`mcp.vercel.com`) |
 | MCP `firecrawl` | `.mcp.json` | web search + scrape; key via `userConfig` (Keychain) |
-| MCP `supabase` | `.mcp.json` | your own database on the ops self-hosted Supabase; bearer token via `userConfig` |
+| MCP `supabase` | `.mcp.json` | your own database on the ops self-hosted Supabase (`db.stlflix.com.br/mcp`); bearer token via `userConfig` |
 | hook `SessionStart` | `hooks/hooks.json` → `scripts/session-start.sh` | setup nudges + last handoff |
 | `stl-setup` | `skills/` | global onboarding (once per machine) |
 | `stl-project-init` | `skills/` | first steps per repository |

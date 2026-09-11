@@ -7,7 +7,7 @@ O *porquê* está em `docs/decisions/005-mcp-proprio-para-o-supabase-do-ops.md` 
 - **Diretório**: `/home/ubuntu/supabase-ops/` — `supabase/docker/` é o sparse-clone
   do compose oficial, este overlay vai em cima dele; `mcp-src/` é a cópia de
   `../../mcp-server` que vira a imagem `stl-supabase-mcp`
-- **Superfícies**: `https://ops.stlflix.com.br/mcp` (MCP, bearer) ·
+- **Superfícies**: `https://db.stlflix.com.br/mcp` (MCP, bearer) ·
   `https://db.stlflix.com.br` (Studio, sessão da plataforma) · loopback
   `5433` (Postgres) e `8100` (envoy) por túnel SSH · `8200/admin` só na rede docker
 
@@ -37,6 +37,18 @@ admin do MCP. Na mão, do host: ver `../../mcp-server/README.md`.
 `db.stlflix.com.br` → proxy laranja da Cloudflare para esta máquina (SSL **Full**,
 não Full Strict: o TLS de origem é o self-signed do Traefik). Um nível só de
 subdomínio, para o certificado universal da Cloudflare cobrir.
+
+**O registro ainda não existe** — os routers estão de pé e inertes; o Traefik
+responde 404 a host sem router, e sem DNS não chega pedido nenhum. Enquanto isso,
+o acesso é por túnel SSH (`8100` Studio, `8200` MCP, `5433` Postgres).
+
+**Se for possível criar na zona `stlflix.com` em vez da `.com.br`, crie lá.**
+Medido em 2026-09-11: a `.com.br` tem Cache Everything na **zona inteira** (o apex
+`stlflix.com.br` guarda URL nova: `MISS` e depois `HIT`), e a `.com` não
+(`research.stlflix.com` e `n8n-ops.stlflix.com` dão `DYNAMIC` nas duas chamadas).
+Um host em `.com` nasce sem o vazamento do
+[AD-028 da plataforma](https://github.com/stlflix/plataforma-product-ops/blob/main/docs/decisions/028-toda-resposta-autenticada-de-api-entra-no-edge.md);
+um em `.com.br` nasce com ele. É trocar `STUDIO_HOST` no `.env`.
 
 ## Atualizar o MCP
 

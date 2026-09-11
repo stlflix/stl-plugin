@@ -21,7 +21,7 @@
     },
     "supabase": {
       "type": "http",
-      "url": "https://ops.stlflix.com.br/mcp",
+      "url": "https://db.stlflix.com.br/mcp",
       "headers": {
         "Authorization": "Bearer ${user_config.supabase_ops_token}"
       }

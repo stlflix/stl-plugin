@@ -61,15 +61,16 @@ stack Supabase self-hosted onde cada colaborador tem **um banco**.
   único no envoy. Web por colaborador, com login próprio, exige um satélite
   `meta`+`studio` por pessoa (~360 MB cada) — decidido quando houver o segundo
   colaborador de verdade.
-- **A rota é a da plataforma, não um subdomínio novo**: `ops.stlflix.com.br/mcp`,
-  como sub-rota de `productops-web`, na mesma forma que `content-assets` e
-  `rastreio-api` já usam nesta máquina — `Host(...) && PathPrefix(...)` com
-  prioridade 100, acima do router só-de-host (58). Zero DNS novo, e não há
-  credencial de Cloudflare nesta máquina nem no VPS de qualquer forma.
-- **O Studio não cabe numa sub-rota.** Ele é buildado com `basePath: ''`, que no
-  Next é constante de build: sob `/supabase` o HTML pediria `/_next/static/...`,
-  que o Traefik entregaria ao `productops-web` — que também é Next. Studio segue
-  no túnel SSH (`8100`) até existir um host raiz para ele.
+- **O MCP e o Studio vivem em `db.stlflix.com.br`**, host próprio. A sub-rota no
+  host da plataforma (`ops.stlflix.com.br/mcp`) chegou a rodar e foi desfeita: o
+  Studio é buildado com `basePath: ''` e é dono de `/_next/` e `/api/`, e servi-lo
+  ao lado do `productops-web` exigia discriminar esses prefixos por `Referer` — que
+  o cache da Cloudflare não considera na chave, então um pedido sem `Referer`
+  envenenava a URL com um 404 da plataforma. O porquê completo está no
+  [AD-002 do módulo da plataforma](https://github.com/stlflix/plataforma-product-ops/blob/main/docs/supabase/decisions/002-onde-o-studio-e-servido.md).
+- **O registro DNS ainda não existe**: os routers estão de pé e inertes, e o acesso
+  segue por túnel SSH. Se for possível criar em `stlflix.com` em vez de
+  `stlflix.com.br`, crie lá — a `.com.br` tem Cache Everything na zona inteira.
 - **A API REST/Auth também não foi exposta.** Ela só serve o banco compartilhado
   `postgres`, e nenhum colaborador vive lá; expor seria superfície pública sem
   consumidor.
