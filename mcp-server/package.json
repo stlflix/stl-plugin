@@ -1,6 +1,6 @@
 {
   "name": "stl-supabase-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "MCP server that gives a STLFLIX collaborator their own database on the ops self-hosted Supabase, and nothing else.",

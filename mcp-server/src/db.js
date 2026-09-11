@@ -1,51 +1,33 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import pg from "pg";
 
 const { Pool } = pg;
 
 /**
- * Every connection is opened as the collaborator's OWN Postgres role, never as
- * postgres or service_role. Isolation is therefore enforced by Postgres itself:
- * a bug in this server still cannot reach another collaborator's database.
+ * One pool per collaborator, opened with the collaborator's OWN Postgres role —
+ * never postgres or service_role. Isolation is therefore enforced by Postgres
+ * itself: a bug in this server still cannot reach another collaborator's
+ * database.
  */
-export function readCollaboratorEnv(dir, slug) {
-  const file = path.join(dir, `${slug}.env`);
-  const values = {};
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    values[line.slice(0, eq)] = line.slice(eq + 1);
-  }
-  const required = ["SUPABASE_DB_USER", "SUPABASE_DB_PASSWORD", "SUPABASE_DB_NAME"];
-  for (const key of required) {
-    if (!values[key]) throw new Error(`${file} is missing ${key}`);
-  }
-  return values;
-}
-
 export class PoolRegistry {
   #pools = new Map();
 
-  constructor({ credentialsDir, host, port, statementTimeoutMs }) {
-    this.credentialsDir = credentialsDir;
+  constructor({ store, host, port, statementTimeoutMs }) {
+    this.store = store;
     this.host = host;
     this.port = port;
     this.statementTimeoutMs = statementTimeoutMs;
   }
 
-  forSlug(slug) {
+  async forSlug(slug) {
     const existing = this.#pools.get(slug);
     if (existing) return existing;
 
-    const env = readCollaboratorEnv(this.credentialsDir, slug);
+    const credentials = await this.store.connectionFor(slug);
+    if (!credentials) throw new Error(`collaborator '${slug}' is not provisioned`);
     const pool = new Pool({
       host: this.host,
       port: this.port,
-      user: env.SUPABASE_DB_USER,
-      password: env.SUPABASE_DB_PASSWORD,
-      database: env.SUPABASE_DB_NAME,
+      ...credentials,
       max: 4,
       idleTimeoutMillis: 30_000,
       statement_timeout: this.statementTimeoutMs,
@@ -54,6 +36,14 @@ export class PoolRegistry {
     pool.on("error", (err) => console.error(`[pool:${slug}] ${err.message}`));
     this.#pools.set(slug, pool);
     return pool;
+  }
+
+  /** After a re-provision the password changed: the cached pool is stale. */
+  async drop(slug) {
+    const pool = this.#pools.get(slug);
+    if (!pool) return;
+    this.#pools.delete(slug);
+    await pool.end();
   }
 
   async closeAll() {
