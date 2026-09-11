@@ -32,27 +32,42 @@ services:
           - kong
       web: {}
     labels:
-      # Studio is built with basePath '' (a Next.js build-time constant) and only
-      # works at the root of a host, so it gets one. Nobody reaches it without a
-      # platform session: forwardAuth asks productops-web, which validates the
-      # SSO ticket / studio cookie. Traffic goes through envoy, never straight to
-      # studio:3000 — the dashboard basic auth lives in envoy, and Traefik injects
-      # it here so the collaborator never sees a second login.
+      # Studio is served on the PLATFORM host, at its OWN paths — no StripPrefix,
+      # because basePath '' means every in-app link is absolute and any prefix
+      # would be lost on the first client-side navigation.
+      #
+      # Measured 2026-09-11: of everything Studio serves, only `/_next/` and
+      # `/api/` collide with productops-web. `/project/` is singular; the
+      # platform's is `/projects/`. Those two are discriminated by Referer, which
+      # a same-origin subresource always sends in full.
+      #
+      # `/api/supabase/` is EXCLUDED on purpose: forward-auth sends a browser
+      # without a session to /api/supabase/studio, and that navigation carries a
+      # Studio page as its Referer — without the exclusion it would come back
+      # here instead of reaching the platform, and loop.
       traefik.enable: "true"
       traefik.docker.network: "root_default"
-      traefik.http.routers.sbstudio.rule: "Host(`${STUDIO_HOST}`)"
+
+      traefik.http.routers.sbstudio.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/project/`) || PathPrefix(`/sign-in`) || PathPrefix(`/monaco-editor`) || PathPrefix(`/img/`) || PathPrefix(`/favicon/`))'
       traefik.http.routers.sbstudio.entrypoints: "websecure"
       traefik.http.routers.sbstudio.tls: "true"
-      traefik.http.routers.sbstudio.priority: "100"
+      traefik.http.routers.sbstudio.priority: "120"
       traefik.http.routers.sbstudio.middlewares: "sbstudio-auth,sbstudio-basic"
-      # API paths the Studio calls from the browser carry their own apikey/Bearer;
-      # the basic-auth header must not overwrite that Authorization. Same session
-      # gate, no header injection.
-      traefik.http.routers.sbstudio-api.rule: "Host(`${STUDIO_HOST}`) && (PathPrefix(`/rest/`) || PathPrefix(`/auth/`) || PathPrefix(`/storage/`) || PathPrefix(`/realtime/`) || PathPrefix(`/functions/`) || PathPrefix(`/pg/`))"
+
+      traefik.http.routers.sbstudio-assets.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/_next/`) || (PathPrefix(`/api/`) && !PathPrefix(`/api/supabase/`))) && HeaderRegexp(`Referer`, `^https://ops\.stlflix\.com\.br/(project/|sign-in|_next/)`)'
+      traefik.http.routers.sbstudio-assets.entrypoints: "websecure"
+      traefik.http.routers.sbstudio-assets.tls: "true"
+      traefik.http.routers.sbstudio-assets.priority: "130"
+      traefik.http.routers.sbstudio-assets.middlewares: "sbstudio-auth,sbstudio-basic"
+
+      # The Supabase data APIs carry their own apikey/Bearer, which the injected
+      # Basic header would overwrite — same gate, no header.
+      traefik.http.routers.sbstudio-api.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/rest/`) || PathPrefix(`/auth/v1`) || PathPrefix(`/storage/v1`) || PathPrefix(`/realtime/`) || PathPrefix(`/functions/`) || PathPrefix(`/pg/`))'
       traefik.http.routers.sbstudio-api.entrypoints: "websecure"
       traefik.http.routers.sbstudio-api.tls: "true"
-      traefik.http.routers.sbstudio-api.priority: "110"
+      traefik.http.routers.sbstudio-api.priority: "120"
       traefik.http.routers.sbstudio-api.middlewares: "sbstudio-auth"
+
       traefik.http.middlewares.sbstudio-auth.forwardauth.address: "http://productops-web:3200/api/supabase/forward-auth"
       traefik.http.middlewares.sbstudio-auth.forwardauth.trustForwardHeader: "true"
       traefik.http.middlewares.sbstudio-basic.headers.customrequestheaders.Authorization: "Basic ${STUDIO_BASIC_AUTH_B64}"
