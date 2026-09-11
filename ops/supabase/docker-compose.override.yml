@@ -32,37 +32,27 @@ services:
           - kong
       web: {}
     labels:
-      # Studio is served on the PLATFORM host, at its OWN paths — no StripPrefix,
-      # because basePath '' means every in-app link is absolute and any prefix
-      # would be lost on the first client-side navigation.
+      # The Studio has a host of its own again (AD-002). It is built with
+      # basePath '' and owns /_next/ and /api/, so sharing a host with
+      # productops-web cost a Referer rule on both prefixes — a rule the
+      # Cloudflare cache ignores, because its key does not vary on Referer. On a
+      # host of its own none of that exists.
       #
-      # Measured 2026-09-11: of everything Studio serves, only `/_next/` and
-      # `/api/` collide with productops-web. `/project/` is singular; the
-      # platform's is `/projects/`. Those two are discriminated by Referer, which
-      # a same-origin subresource always sends in full.
-      #
-      # `/api/supabase/` is EXCLUDED on purpose: forward-auth sends a browser
-      # without a session to /api/supabase/studio, and that navigation carries a
-      # Studio page as its Referer — without the exclusion it would come back
-      # here instead of reaching the platform, and loop.
+      # Nobody reaches it without a platform session: forwardAuth asks
+      # productops-web, which validates the SSO ticket or the studio cookie, and
+      # Traefik injects the dashboard basic auth so no second login appears.
       traefik.enable: "true"
       traefik.docker.network: "root_default"
 
-      traefik.http.routers.sbstudio.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/project/`) || PathPrefix(`/sign-in`) || PathPrefix(`/monaco-editor`) || PathPrefix(`/img/`) || PathPrefix(`/favicon/`))'
+      traefik.http.routers.sbstudio.rule: 'Host(`${STUDIO_HOST}`)'
       traefik.http.routers.sbstudio.entrypoints: "websecure"
       traefik.http.routers.sbstudio.tls: "true"
-      traefik.http.routers.sbstudio.priority: "120"
+      traefik.http.routers.sbstudio.priority: "100"
       traefik.http.routers.sbstudio.middlewares: "sbstudio-auth,sbstudio-basic"
-
-      traefik.http.routers.sbstudio-assets.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/_next/`) || (PathPrefix(`/api/`) && !PathPrefix(`/api/supabase/`))) && HeaderRegexp(`Referer`, `^https://ops\.stlflix\.com\.br/(project/|sign-in|_next/)`)'
-      traefik.http.routers.sbstudio-assets.entrypoints: "websecure"
-      traefik.http.routers.sbstudio-assets.tls: "true"
-      traefik.http.routers.sbstudio-assets.priority: "130"
-      traefik.http.routers.sbstudio-assets.middlewares: "sbstudio-auth,sbstudio-basic"
 
       # The Supabase data APIs carry their own apikey/Bearer, which the injected
       # Basic header would overwrite — same gate, no header.
-      traefik.http.routers.sbstudio-api.rule: 'Host(`ops.stlflix.com.br`) && (PathPrefix(`/rest/`) || PathPrefix(`/auth/v1`) || PathPrefix(`/storage/v1`) || PathPrefix(`/realtime/`) || PathPrefix(`/functions/`) || PathPrefix(`/pg/`))'
+      traefik.http.routers.sbstudio-api.rule: 'Host(`${STUDIO_HOST}`) && (PathPrefix(`/rest/`) || PathPrefix(`/auth/v1`) || PathPrefix(`/storage/v1`) || PathPrefix(`/realtime/`) || PathPrefix(`/functions/`) || PathPrefix(`/pg/`))'
       traefik.http.routers.sbstudio-api.entrypoints: "websecure"
       traefik.http.routers.sbstudio-api.tls: "true"
       traefik.http.routers.sbstudio-api.priority: "120"
@@ -95,14 +85,13 @@ services:
       default: {}
       web: {}
     labels:
-      # Sub-route of the platform host, the same shape content-assets and
-      # rastreio-api already use on this box: priority above the host-only router.
-      # No basic auth: the MCP server authenticates every request with its bearer.
+      # Same host as the Studio, above its catch-all router. No basic auth: the
+      # MCP server authenticates every request with its own bearer.
       # /admin is deliberately NOT routed — loopback and the docker network only.
       traefik.enable: "true"
       traefik.docker.network: "root_default"
-      traefik.http.routers.sbmcp.rule: "Host(`ops.stlflix.com.br`) && PathPrefix(`/mcp`)"
-      traefik.http.routers.sbmcp.priority: "100"
+      traefik.http.routers.sbmcp.rule: 'Host(`${STUDIO_HOST}`) && PathPrefix(`/mcp`)'
+      traefik.http.routers.sbmcp.priority: "130"
       traefik.http.routers.sbmcp.entrypoints: "websecure"
       traefik.http.routers.sbmcp.tls: "true"
       traefik.http.services.sbmcp.loadbalancer.server.port: "8200"
