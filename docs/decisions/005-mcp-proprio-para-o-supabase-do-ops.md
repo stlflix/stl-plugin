@@ -60,6 +60,15 @@ stack Supabase self-hosted onde cada colaborador tem **um banco**.
   único no envoy. Web por colaborador, com login próprio, exige um satélite
   `meta`+`studio` por pessoa (~360 MB cada) — decidido quando houver o segundo
   colaborador de verdade.
-- Falta o **DNS na Cloudflare** para `sb-ops.stlflix.com` e `mcp-ops.stlflix.com`.
-  Os routers do Traefik já estão registrados e inertes; nenhuma credencial de
-  Cloudflare existe na máquina do Lucas nem no VPS.
+- **A rota é a da plataforma, não um subdomínio novo**: `ops.stlflix.com.br/mcp`,
+  como sub-rota de `productops-web`, na mesma forma que `content-assets` e
+  `rastreio-api` já usam nesta máquina — `Host(...) && PathPrefix(...)` com
+  prioridade 100, acima do router só-de-host (58). Zero DNS novo, e não há
+  credencial de Cloudflare nesta máquina nem no VPS de qualquer forma.
+- **O Studio não cabe numa sub-rota.** Ele é buildado com `basePath: ''`, que no
+  Next é constante de build: sob `/supabase` o HTML pediria `/_next/static/...`,
+  que o Traefik entregaria ao `productops-web` — que também é Next. Studio segue
+  no túnel SSH (`8100`) até existir um host raiz para ele.
+- **A API REST/Auth também não foi exposta.** Ela só serve o banco compartilhado
+  `postgres`, e nenhum colaborador vive lá; expor seria superfície pública sem
+  consumidor.
