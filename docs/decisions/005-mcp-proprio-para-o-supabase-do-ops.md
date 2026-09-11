@@ -56,6 +56,7 @@ stack Supabase self-hosted onde cada colaborador tem **um banco**.
   pelo MCP; a CLI continua valendo para quem tem acesso ao host.
 - O `security-check` continua tratando `postgres://user:pass@` e `service_role` no
   diff como BLOCK — agora com menos motivo para aparecerem.
+- Persistência e provisionamento mudaram de arquivo para Postgres + API admin: ver [006](006-registro-no-postgres-e-api-admin-do-mcp.md).
 - **Studio é por banco** (`POSTGRES_DB` + `meta`) e o login do dashboard é um par
   único no envoy. Web por colaborador, com login próprio, exige um satélite
   `meta`+`studio` por pessoa (~360 MB cada) — decidido quando houver o segundo
