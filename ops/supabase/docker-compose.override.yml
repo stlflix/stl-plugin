@@ -1,0 +1,98 @@
+# Overlay on the official supabase/docker compose, on mkt-vps (no swap, shared with
+# production). Enabled by COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml
+# in .env — without that line this file is silently ignored (AD-005).
+#
+#  - only six upstream services run: db meta rest auth studio api-gw (+ our mcp)
+#  - every published surface stays on loopback; 8000 is taken by whisper-api
+#  - every container has an explicit mem_limit, the convention of this box
+#  - Traefik routes exactly two things: /mcp under the platform host, and the
+#    Studio under its own host behind the platform's session (forwardAuth)
+services:
+  db:
+    mem_limit: 768m
+    ports: !override
+      - "127.0.0.1:5433:5432"
+  studio:
+    mem_limit: 512m
+  meta:
+    mem_limit: 192m
+  rest:
+    mem_limit: 128m
+  auth:
+    mem_limit: 128m
+
+  api-gw:
+    mem_limit: 128m
+    ports: !override
+      - "127.0.0.1:8100:8000/tcp"
+    networks:
+      default:
+        aliases:
+          - envoy
+          - kong
+      web: {}
+    labels:
+      # Studio is built with basePath '' (a Next.js build-time constant) and only
+      # works at the root of a host, so it gets one. Nobody reaches it without a
+      # platform session: forwardAuth asks productops-web, which validates the
+      # SSO ticket / studio cookie. Traffic goes through envoy, never straight to
+      # studio:3000 — the dashboard basic auth lives in envoy, and Traefik injects
+      # it here so the collaborator never sees a second login.
+      traefik.enable: "true"
+      traefik.docker.network: "root_default"
+      traefik.http.routers.sbstudio.rule: "Host(`${STUDIO_HOST}`)"
+      traefik.http.routers.sbstudio.entrypoints: "websecure"
+      traefik.http.routers.sbstudio.tls: "true"
+      traefik.http.routers.sbstudio.priority: "100"
+      traefik.http.routers.sbstudio.middlewares: "sbstudio-auth,sbstudio-basic"
+      # API paths the Studio calls from the browser carry their own apikey/Bearer;
+      # the basic-auth header must not overwrite that Authorization. Same session
+      # gate, no header injection.
+      traefik.http.routers.sbstudio-api.rule: "Host(`${STUDIO_HOST}`) && (PathPrefix(`/rest/`) || PathPrefix(`/auth/`) || PathPrefix(`/storage/`) || PathPrefix(`/realtime/`) || PathPrefix(`/functions/`) || PathPrefix(`/pg/`))"
+      traefik.http.routers.sbstudio-api.entrypoints: "websecure"
+      traefik.http.routers.sbstudio-api.tls: "true"
+      traefik.http.routers.sbstudio-api.priority: "110"
+      traefik.http.routers.sbstudio-api.middlewares: "sbstudio-auth"
+      traefik.http.middlewares.sbstudio-auth.forwardauth.address: "http://productops-web:3200/api/supabase/forward-auth"
+      traefik.http.middlewares.sbstudio-auth.forwardauth.trustForwardHeader: "true"
+      traefik.http.middlewares.sbstudio-basic.headers.customrequestheaders.Authorization: "Basic ${STUDIO_BASIC_AUTH_B64}"
+      traefik.http.services.sbstudio.loadbalancer.server.port: "8000"
+
+  # Our own MCP server (../../mcp-server): the collaborator reaches their database
+  # through it, and the connection string never leaves this container.
+  mcp:
+    image: stl-supabase-mcp:${MCP_IMAGE_TAG:-0.2.0}
+    container_name: stl-supabase-mcp
+    restart: unless-stopped
+    mem_limit: 192m
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      ADMIN_DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      ADMIN_KEY: ${MCP_ADMIN_KEY}
+      CREDENTIALS_KEY: ${MCP_CREDENTIALS_KEY}
+    ports:
+      - "127.0.0.1:8200:8200"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      default: {}
+      web: {}
+    labels:
+      # Sub-route of the platform host, the same shape content-assets and
+      # rastreio-api already use on this box: priority above the host-only router.
+      # No basic auth: the MCP server authenticates every request with its bearer.
+      # /admin is deliberately NOT routed — loopback and the docker network only.
+      traefik.enable: "true"
+      traefik.docker.network: "root_default"
+      traefik.http.routers.sbmcp.rule: "Host(`ops.stlflix.com.br`) && PathPrefix(`/mcp`)"
+      traefik.http.routers.sbmcp.priority: "100"
+      traefik.http.routers.sbmcp.entrypoints: "websecure"
+      traefik.http.routers.sbmcp.tls: "true"
+      traefik.http.services.sbmcp.loadbalancer.server.port: "8200"
+
+networks:
+  web:
+    external: true
+    name: root_default

@@ -36,7 +36,7 @@ const POLICIES_SQL = `
 
 export function defineTools({ pools }) {
   const query = async (slug, sql, params = []) => {
-    const result = await pools.forSlug(slug).query(sql, params);
+    const result = await (await pools.forSlug(slug)).query(sql, params);
     return result;
   };
 
@@ -96,7 +96,7 @@ export function defineTools({ pools }) {
           throw new Error("migration name must match ^[a-z0-9_]{1,60}$");
         }
         const version = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-        const client = await pools.forSlug(slug).connect();
+        const client = await (await pools.forSlug(slug)).connect();
         try {
           await client.query("BEGIN");
           await client.query(`CREATE SCHEMA IF NOT EXISTS ${MIGRATIONS_SCHEMA}`);

@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { test } from "node:test";
-import { bearerFrom, hashToken, loadTokenMap, slugForToken } from "../src/auth.js";
-import { readCollaboratorEnv } from "../src/db.js";
-
-const dir = mkdtempSync(path.join(tmpdir(), "stl-mcp-"));
+import { bearerFrom, hashToken, isValidSlug, secretEquals } from "../src/auth.js";
 
 test("bearerFrom accepts only a well-formed Bearer header", () => {
   assert.equal(bearerFrom("Bearer abc123"), "abc123");
@@ -16,42 +10,22 @@ test("bearerFrom accepts only a well-formed Bearer header", () => {
   assert.equal(bearerFrom(undefined), null);
 });
 
-test("loadTokenMap rejects a file that is not a sha256 map", () => {
-  const bad = path.join(dir, "bad.json");
-  writeFileSync(bad, JSON.stringify({ "not-a-hash": "lucas" }));
-  assert.throws(() => loadTokenMap(bad), /not a sha256/);
-
-  const badSlug = path.join(dir, "bad-slug.json");
-  writeFileSync(badSlug, JSON.stringify({ [hashToken("x")]: "Lucas Melo" }));
-  assert.throws(() => loadTokenMap(badSlug), /invalid slug/);
-
-  const empty = path.join(dir, "empty.json");
-  writeFileSync(empty, "{}");
-  assert.throws(() => loadTokenMap(empty), /is empty/);
+test("isValidSlug is the same rule the table CHECK enforces", () => {
+  for (const ok of ["lucas", "a1", "alice_b", "x".repeat(31)]) assert.equal(isValidSlug(ok), true, ok);
+  for (const bad of ["Lucas", "1abc", "a", "a-b", "a b", "x".repeat(32), "", null, "drop;"]) {
+    assert.equal(isValidSlug(bad), false, String(bad));
+  }
 });
 
-test("slugForToken maps a known token and refuses everything else", () => {
-  const file = path.join(dir, "tokens.json");
-  writeFileSync(file, JSON.stringify({ [hashToken("secret-lucas")]: "lucas" }));
-  const map = loadTokenMap(file);
-
-  assert.equal(slugForToken(map, "secret-lucas"), "lucas");
-  assert.equal(slugForToken(map, "secret-alice"), null);
-  assert.equal(slugForToken(map, ""), null);
-  assert.equal(slugForToken(map, undefined), null);
+test("secretEquals refuses anything but the exact secret", () => {
+  assert.equal(secretEquals("k1", "k1"), true);
+  assert.equal(secretEquals("k1", "k2"), false);
+  assert.equal(secretEquals("k", "k1"), false);
+  assert.equal(secretEquals(undefined, "k1"), false);
+  assert.equal(secretEquals("k1", undefined), false);
 });
 
-test("readCollaboratorEnv parses the generated file and demands the required keys", () => {
-  const collaborators = path.join(dir, "collaborators");
-  mkdirSync(collaborators, { recursive: true });
-  writeFileSync(
-    path.join(collaborators, "lucas.env"),
-    "# comment\nSUPABASE_DB_URL=postgres://lucas:pw@127.0.0.1:5433/db_lucas\nSUPABASE_DB_USER=lucas\nSUPABASE_DB_PASSWORD=pw\nSUPABASE_DB_NAME=db_lucas\n",
-  );
-  const env = readCollaboratorEnv(collaborators, "lucas");
-  assert.equal(env.SUPABASE_DB_USER, "lucas");
-  assert.equal(env.SUPABASE_DB_NAME, "db_lucas");
-
-  writeFileSync(path.join(collaborators, "broken.env"), "SUPABASE_DB_USER=x\n");
-  assert.throws(() => readCollaboratorEnv(collaborators, "broken"), /missing SUPABASE_DB_PASSWORD/);
+test("hashToken is sha256 hex, and differs per token", () => {
+  assert.match(hashToken("stl_a"), /^[0-9a-f]{64}$/);
+  assert.notEqual(hashToken("stl_a"), hashToken("stl_b"));
 });
