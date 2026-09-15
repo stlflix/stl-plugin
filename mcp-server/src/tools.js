@@ -2,37 +2,10 @@
  * Tools exposed to a collaborator, all scoped to their own database by the
  * Postgres role the pool authenticates with.
  */
+import { DESCRIBE_SQL, LIST_TABLES_SQL, POLICIES_SQL } from "./catalog.js";
+
 const MIGRATIONS_SCHEMA = "supabase_migrations";
 const MIGRATIONS_TABLE = "schema_migrations";
-
-const LIST_TABLES_SQL = `
-  SELECT n.nspname AS schema,
-         c.relname AS name,
-         CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view'
-                        WHEN 'm' THEN 'materialized view' WHEN 'p' THEN 'partitioned table'
-                        WHEN 'f' THEN 'foreign table' END AS kind,
-         c.relrowsecurity AS rls_enabled,
-         obj_description(c.oid) AS comment
-  FROM pg_class c
-  JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE c.relkind = ANY (ARRAY['r','v','m','p','f'])
-    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-  ORDER BY 1, 2`;
-
-const DESCRIBE_SQL = `
-  SELECT a.attname AS column,
-         format_type(a.atttypid, a.atttypmod) AS type,
-         NOT a.attnotnull AS nullable,
-         pg_get_expr(d.adbin, d.adrelid) AS default,
-         a.attnum AS position
-  FROM pg_attribute a
-  LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-  WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped
-  ORDER BY a.attnum`;
-
-const POLICIES_SQL = `
-  SELECT policyname AS name, cmd, roles, qual AS using_expression, with_check
-  FROM pg_policies WHERE schemaname || '.' || tablename = $1 OR tablename = $1`;
 
 export function defineTools({ pools }) {
   const query = async (slug, sql, params = []) => {

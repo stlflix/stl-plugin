@@ -44,7 +44,7 @@ const tools = defineTools({ pools });
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 function buildServer(slug) {
-  const server = new Server({ name: "stl-supabase", version: "0.2.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "stl-supabase", version: "0.3.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })),
