@@ -113,7 +113,10 @@ export function commonPlan({ slug, fnPassword }) {
     db,
     sql: `GRANT SELECT ON buildloop.edge_functions, buildloop.edge_function_versions, buildloop.invocations TO ${slug}`,
   });
-  plan.push({ db, sql: `GRANT INSERT ON buildloop.invocations TO ${fn}` });
+  // The runtime writes the log AND trims it (BL-24: the last 200 of a function,
+  // nothing older than a day), and it does both as `_fn`, the only identity it
+  // holds. Trimming reads the ids it keeps, so SELECT comes with DELETE.
+  plan.push({ db, sql: `GRANT SELECT, INSERT, DELETE ON buildloop.invocations TO ${fn}` });
   plan.push({ db, sql: `GRANT USAGE ON SEQUENCE buildloop.invocations_id_seq TO ${fn}` });
   plan.push({ db, sql: `REVOKE ALL ON buildloop.edge_function_secrets FROM ${everyone}` });
   return plan;

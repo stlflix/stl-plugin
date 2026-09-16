@@ -100,7 +100,10 @@ test("the buildloop schema is readable by the slug, writable to invocations by _
     assert.ok(sql.some((s) => s.startsWith(`CREATE TABLE IF NOT EXISTS buildloop.${table} `)), table);
   }
   assert.ok(sql.includes("GRANT SELECT ON buildloop.edge_functions, buildloop.edge_function_versions, buildloop.invocations TO alice"));
-  assert.ok(sql.includes("GRANT INSERT ON buildloop.invocations TO alice_fn"));
+  assert.ok(
+    sql.includes("GRANT SELECT, INSERT, DELETE ON buildloop.invocations TO alice_fn"),
+    "the runtime writes the log and trims it to the retention, both as _fn",
+  );
   assert.ok(sql.includes("GRANT USAGE ON SEQUENCE buildloop.invocations_id_seq TO alice_fn"));
   assert.ok(sql.includes("REVOKE ALL ON buildloop.edge_function_secrets FROM alice, alice_anon, alice_authenticated, alice_fn"));
   assert.ok(!sql.some((s) => /GRANT[^;]*edge_function_secrets/.test(s)), "nobody but the admin role reads the secrets");
