@@ -394,3 +394,348 @@ test("the new routes exist only as POST", async () => {
     await res.arrayBuffer();
   }
 });
+
+/**
+ * The Edge Function route and the registry routes, on two more servers: the
+ * first proves that a collaborator's functions are reached only through their
+ * own pool (its `adminPool` is the Proxy that throws), the second that the
+ * registry — origins and tickets — never opens a collaborator pool at all.
+ */
+const CREDENTIALS_KEY = Buffer.alloc(32, 7);
+const HELLO = 'export default () => new Response("hi")';
+
+function buildloopPool() {
+  const state = { functions: [], versions: [], secrets: [], invocations: [] };
+  const run = async (sql, params = []) => {
+    if (sql.includes("INSERT INTO buildloop.edge_functions")) {
+      if (!state.functions.some((f) => f.name === params[0])) state.functions.push({ name: params[0], current_version: 0 });
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("INSERT INTO buildloop.edge_function_versions")) {
+      const [name, version, source, bundle] = params;
+      const row = state.versions.find((v) => v.name === name && v.version === version);
+      if (row) Object.assign(row, { source, bundle: bundle ?? "" });
+      else state.versions.push({ name, version, source, bundle: bundle ?? "" });
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("UPDATE buildloop.edge_functions SET current_version")) {
+      state.functions.find((f) => f.name === params[0]).current_version = params[1];
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("SELECT source FROM buildloop.edge_function_versions")) {
+      return { rows: state.versions.filter((v) => v.name === params[0] && v.version === params[1]).map((v) => ({ source: v.source })) };
+    }
+    if (sql.includes("SELECT current_version FROM buildloop.edge_functions")) {
+      return { rows: state.functions.filter((f) => f.name === params[0]).map((f) => ({ current_version: f.current_version })) };
+    }
+    if (sql.includes("INSERT INTO buildloop.edge_function_secrets")) {
+      state.secrets.push({ name: params[0], key: params[1], value_enc: params[2] });
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("SELECT key FROM buildloop.edge_function_secrets")) {
+      return { rows: state.secrets.filter((s) => s.name === params[0]).map((s) => ({ key: s.key })) };
+    }
+    if (sql.includes("FROM buildloop.invocations")) {
+      return { rows: state.invocations.filter((i) => i.name === params[0]) };
+    }
+    if (sql.includes("FROM buildloop.edge_functions f")) {
+      return {
+        rows: state.functions.map((f) => ({
+          name: f.name,
+          current_version: f.current_version,
+          updated_at: null,
+          published_at: null,
+          secret_keys: state.secrets.filter((s) => s.name === f.name).map((s) => s.key),
+        })),
+      };
+    }
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    throw new Error(`unexpected edge query: ${sql.slice(0, 40)}`);
+  };
+  return {
+    state,
+    pool: { query: (sql, params) => run(sql, params), connect: async () => ({ query: (sql, params) => run(sql, params), release() {} }) },
+  };
+}
+
+/** `stl_mcp` in memory: the two registry tables and nothing else. */
+function registryPool() {
+  const allowed = [];
+  const spent = new Set();
+  return {
+    allowed,
+    spent,
+    async query(sql, params = []) {
+      if (sql.includes("INSERT INTO stl_mcp.allowed_origins")) {
+        if (allowed.some((r) => r.origin === params[0])) return { rows: [], rowCount: 0 };
+        allowed.push({ origin: params[0], slug: params[1], created_at: "2026-09-16T00:00:00.000Z" });
+        return { rows: [{ origin: params[0] }], rowCount: 1 };
+      }
+      if (sql.startsWith("DELETE FROM stl_mcp.allowed_origins")) {
+        const before = allowed.length;
+        for (let i = allowed.length - 1; i >= 0; i -= 1) {
+          if (allowed[i].origin === params[0] && allowed[i].slug === params[1]) allowed.splice(i, 1);
+        }
+        return { rows: [], rowCount: before - allowed.length };
+      }
+      if (sql.includes("FROM stl_mcp.allowed_origins WHERE slug = $1")) {
+        return { rows: allowed.filter((r) => r.slug === params[0]) };
+      }
+      if (sql.includes("FROM stl_mcp.allowed_origins WHERE origin = $1")) {
+        return { rows: allowed.filter((r) => r.origin === params[0]) };
+      }
+      if (sql.includes("INSERT INTO stl_mcp.used_tickets")) {
+        if (spent.has(params[0])) return { rows: [], rowCount: 0 };
+        spent.add(params[0]);
+        return { rows: [{ jti: params[0] }], rowCount: 1 };
+      }
+      if (sql.startsWith("DELETE FROM stl_mcp.used_tickets")) return { rows: [], rowCount: 0 };
+      throw new Error(`unexpected registry query: ${sql.slice(0, 40)}`);
+    },
+  };
+}
+
+const edgeDb = buildloopPool();
+const edgeForSlugCalls = [];
+const registry = registryPool();
+const registryForSlugCalls = [];
+
+let edgeServer;
+let edgeBase;
+let registryServer;
+let registryBase;
+
+before(async () => {
+  const edgeApp = express();
+  edgeApp.use(express.json());
+  edgeApp.use(
+    "/admin",
+    adminRouter({
+      adminKey: ADMIN_KEY,
+      adminPool,
+      adminConnection: {},
+      credentialsKey: CREDENTIALS_KEY,
+      store,
+      pools: { forSlug: async (slug) => (edgeForSlugCalls.push(slug), edgeDb.pool) },
+    }),
+  );
+  edgeApp.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
+  await new Promise((resolve) => {
+    edgeServer = edgeApp.listen(0, "127.0.0.1", resolve);
+  });
+  edgeBase = `http://127.0.0.1:${edgeServer.address().port}/admin`;
+
+  const registryApp = express();
+  registryApp.use(express.json());
+  registryApp.use(
+    "/admin",
+    adminRouter({
+      adminKey: ADMIN_KEY,
+      adminPool: registry,
+      adminConnection: {},
+      credentialsKey: CREDENTIALS_KEY,
+      store,
+      pools: {
+        forSlug: async (slug) => {
+          registryForSlugCalls.push(slug);
+          throw new Error("the registry must not open a collaborator pool");
+        },
+      },
+    }),
+  );
+  registryApp.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
+  await new Promise((resolve) => {
+    registryServer = registryApp.listen(0, "127.0.0.1", resolve);
+  });
+  registryBase = `http://127.0.0.1:${registryServer.address().port}/admin`;
+});
+
+after(() => {
+  edgeServer.close();
+  registryServer.close();
+});
+
+async function send(method, path, body, at, headers = { "X-Admin-Key": ADMIN_KEY }) {
+  const res = await fetch(`${at}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  return { status: res.status, body: text === "" ? null : JSON.parse(text) };
+}
+
+test("edge refuses a missing or wrong admin key with 401, and a bad slug with 400", async () => {
+  const before = edgeForSlugCalls.length;
+  assert.equal((await send("POST", "/collaborators/alice/edge", {}, edgeBase, {})).status, 401);
+  assert.equal((await send("POST", "/collaborators/alice/edge", {}, edgeBase, { "X-Admin-Key": "nope" })).status, 401);
+  const bad = await send("POST", "/collaborators/Alice;drop/edge", {}, edgeBase);
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /slug must match/);
+  assert.equal(edgeForSlugCalls.length, before, "no pool was opened");
+});
+
+test("edge answers 404 for an unprovisioned slug without opening a pool", async () => {
+  const before = edgeForSlugCalls.length;
+  const { status, body } = await send("POST", "/collaborators/bob/edge", {}, edgeBase);
+  assert.equal(status, 404);
+  assert.equal(body.error, "not provisioned");
+  assert.equal(edgeForSlugCalls.length, before);
+});
+
+test("edge with an empty body lists the functions of that collaborator", async () => {
+  const { status, body } = await send("POST", "/collaborators/alice/edge", {}, edgeBase);
+  assert.equal(status, 200);
+  assert.deepEqual(body, { slug: "alice", functions: [] });
+  assert.equal(edgeForSlugCalls.at(-1), "alice");
+});
+
+test("edge with a source saves the draft, and publish answers the new version", async () => {
+  const saved = await send("POST", "/collaborators/alice/edge", { name: "hello", source: HELLO }, edgeBase);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body, { slug: "alice", name: "hello", saved: true });
+
+  const published = await send("POST", "/collaborators/alice/edge", { name: "hello", publish: true }, edgeBase);
+  assert.equal(published.status, 200);
+  assert.equal(published.body.version, 1);
+  assert.ok(published.body.bytes > 0);
+
+  const listed = await send("POST", "/collaborators/alice/edge", {}, edgeBase);
+  assert.deepEqual(listed.body.functions.map((f) => [f.name, f.currentVersion]), [["hello", 1]]);
+});
+
+test("a source that does not compile answers 400 with the text, the line and the column", async () => {
+  await send("POST", "/collaborators/alice/edge", { name: "hello", source: "export default (" }, edgeBase);
+  const { status, body } = await send("POST", "/collaborators/alice/edge", { name: "hello", publish: true }, edgeBase);
+  assert.equal(status, 400);
+  assert.match(body.text, /Unexpected end of file/);
+  assert.equal(body.line, 1);
+  assert.equal(body.column, 16);
+  assert.equal(edgeDb.state.functions.find((f) => f.name === "hello").current_version, 1, "the live version stayed put");
+});
+
+test("edge with secrets stores them and answers only their keys", async () => {
+  const { status, body } = await send("POST", "/collaborators/alice/edge", { name: "hello", secrets: { TOKEN: "t0p" } }, edgeBase);
+  assert.equal(status, 200);
+  assert.deepEqual(body, { slug: "alice", name: "hello", keys: ["TOKEN"] });
+  assert.ok(!JSON.stringify(body).includes("t0p"));
+  assert.notEqual(edgeDb.state.secrets[0].value_enc, "t0p", "the value is stored encrypted");
+});
+
+test("edge with logs true answers the invocations of that function", async () => {
+  edgeDb.state.invocations.push({ name: "hello", at: "2026-09-16T10:00:00Z", version: 1, status: 200, duration_ms: 3, log: [], error: null });
+  const { status, body } = await send("POST", "/collaborators/alice/edge", { name: "hello", logs: true }, edgeBase);
+  assert.equal(status, 200);
+  assert.deepEqual(body.invocations.map((i) => [i.status, i.durationMs]), [[200, 3]]);
+});
+
+test("edge refuses a bad function name and a body that names no operation with 400", async () => {
+  const bad = await send("POST", "/collaborators/alice/edge", { name: "Hello", source: HELLO }, edgeBase);
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /name must match/);
+
+  const nothing = await send("POST", "/collaborators/alice/edge", { name: "hello" }, edgeBase);
+  assert.equal(nothing.status, 400);
+  assert.match(nothing.body.error, /body must be/);
+
+  const ghost = await send("POST", "/collaborators/alice/edge", { name: "ghost", publish: true }, edgeBase);
+  assert.equal(ghost.status, 404);
+  assert.match(ghost.body.error, /no edge function named 'ghost'/);
+});
+
+test("the edge route never touches the adminPool", async () => {
+  // Its `adminPool` is the Proxy that throws on any access; every call above
+  // answered without a 500 carrying its message.
+  for (const body of [{}, { name: "hello", logs: true }]) {
+    const res = await send("POST", "/collaborators/alice/edge", body, edgeBase);
+    assert.equal(res.status, 200);
+    assert.ok(!JSON.stringify(res.body).includes("adminPool touched"));
+  }
+});
+
+test("the registry routes refuse a missing or wrong admin key with 401", async () => {
+  for (const [method, path, body] of [
+    ["GET", "/origins?slug=alice", undefined],
+    ["POST", "/origins", { slug: "alice", origin: "https://app.x.com" }],
+    ["DELETE", "/origins", { slug: "alice", origin: "https://app.x.com" }],
+    ["GET", "/origins/resolve?origin=https://app.x.com", undefined],
+    ["POST", "/tickets/consume", { jti: "j", expiresAt: "2026-09-16T12:00:00Z" }],
+  ]) {
+    assert.equal((await send(method, path, body, registryBase, {})).status, 401, path);
+    assert.equal((await send(method, path, body, registryBase, { "X-Admin-Key": "nope" })).status, 401, path);
+  }
+  assert.deepEqual(registry.allowed, []);
+});
+
+test("POST /origins registers an origin for a slug, and repeating it changes nothing", async () => {
+  const created = await send("POST", "/origins", { slug: "alice", origin: "https://app.x.com/" }, registryBase);
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body, { origin: "https://app.x.com", slug: "alice", created: true });
+  const again = await send("POST", "/origins", { slug: "alice", origin: "https://app.x.com" }, registryBase);
+  assert.equal(again.status, 200);
+  assert.equal(again.body.created, false);
+  assert.equal(registry.allowed.length, 1);
+});
+
+test("POST /origins answers 409 when another collaborator already owns the origin", async () => {
+  const { status, body } = await send("POST", "/origins", { slug: "bob", origin: "https://app.x.com" }, registryBase);
+  assert.equal(status, 409);
+  assert.equal(body.slug, "alice");
+  assert.match(body.error, /already registered by another collaborator/);
+});
+
+test("POST /origins refuses a bad origin or a bad slug with 400", async () => {
+  for (const body of [
+    { slug: "alice", origin: "http://example.com" },
+    { slug: "alice", origin: "https://a.com/path" },
+    { slug: "Alice", origin: "https://a.com" },
+    { slug: "alice" },
+  ]) {
+    assert.equal((await send("POST", "/origins", body, registryBase)).status, 400, JSON.stringify(body));
+  }
+});
+
+test("GET /origins lists what the slug registered, and refuses a bad slug with 400", async () => {
+  const { status, body } = await send("GET", "/origins?slug=alice", undefined, registryBase);
+  assert.equal(status, 200);
+  assert.deepEqual(body.origins.map((o) => o.origin), ["https://app.x.com"]);
+  assert.equal((await send("GET", "/origins?slug=Alice", undefined, registryBase)).status, 400);
+});
+
+test("GET /origins/resolve answers the slug that owns the origin, or 404", async () => {
+  const found = await send("GET", "/origins/resolve?origin=https://app.x.com", undefined, registryBase);
+  assert.equal(found.status, 200);
+  assert.equal(found.body.slug, "alice");
+  assert.equal((await send("GET", "/origins/resolve?origin=https://nobody.x.com", undefined, registryBase)).status, 404);
+  assert.equal((await send("GET", "/origins/resolve?origin=nonsense", undefined, registryBase)).status, 404);
+});
+
+test("DELETE /origins removes only the origin of the slug that asks", async () => {
+  const notYours = await send("DELETE", "/origins", { slug: "bob", origin: "https://app.x.com" }, registryBase);
+  assert.equal(notYours.status, 200);
+  assert.equal(notYours.body.removed, false);
+  assert.equal(registry.allowed.length, 1);
+
+  const mine = await send("DELETE", "/origins", { slug: "alice", origin: "https://app.x.com" }, registryBase);
+  assert.equal(mine.body.removed, true);
+  assert.equal(registry.allowed.length, 0);
+});
+
+test("a ticket is consumed with 204 the first time and refused with 409 the second", async () => {
+  const first = await send("POST", "/tickets/consume", { jti: "jti-1", expiresAt: "2026-09-16T12:00:00Z" }, registryBase);
+  assert.equal(first.status, 204);
+  assert.equal(first.body, null, "204 carries no body");
+  const replay = await send("POST", "/tickets/consume", { jti: "jti-1", expiresAt: "2026-09-16T12:00:00Z" }, registryBase);
+  assert.equal(replay.status, 409);
+  assert.match(replay.body.error, /already used/);
+});
+
+test("a malformed ticket is refused with 400", async () => {
+  for (const body of [{}, { jti: "" }, { jti: "jti-2" }, { jti: "jti-2", expiresAt: "soon" }]) {
+    assert.equal((await send("POST", "/tickets/consume", body, registryBase)).status, 400, JSON.stringify(body));
+  }
+});
+
+test("the registry routes never open a collaborator pool", async () => {
+  assert.deepEqual(registryForSlugCalls, [], "origins and tickets answer from stl_mcp alone");
+});

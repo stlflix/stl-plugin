@@ -76,7 +76,7 @@ app.get("/healthz", async (_req, res) => {
   }
 });
 
-app.use("/admin", adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, store, pools }));
+app.use("/admin", adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, credentialsKey: config.credentialsKey, store, pools }));
 
 app.post("/mcp", async (req, res) => {
   const token = bearerFrom(req.get("authorization"));

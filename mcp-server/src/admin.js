@@ -12,9 +12,12 @@ import {
   rowsToRlsState,
   runLints,
 } from "./catalog.js";
+import * as edge from "./edge.js";
 import { ExecConflict, InvalidExecInput, SqlRejected, runExec } from "./mutations.js";
+import * as origins from "./origins.js";
 import { provisionCollaborator, upgradeCollaborator } from "./provision.js";
 import { InvalidQueryInput, isPostgresError, parseQueryInput, runReadOnly } from "./readonly.js";
+import * as tickets from "./tickets.js";
 
 /**
  * Admin surface, for the platform (plataforma-product-ops) and for Lucas's shell.
@@ -25,6 +28,7 @@ export function adminRouter({
   adminKey,
   adminPool,
   adminConnection,
+  credentialsKey,
   store,
   pools,
   // The two calls that need the admin role are injected so a test can prove
@@ -190,6 +194,106 @@ export function adminRouter({
     const { fnPassword } = await provision.upgradeCollaborator(adminPool, adminConnection, slug);
     await store.setFnPassword(slug, fnPassword);
     res.json({ slug, upgraded: true });
+  });
+
+  /**
+   * One route, five operations, told apart by the shape of the body — the same
+   * multiplexing the Studio's panel speaks. Every one of them runs on the
+   * collaborator's own pool: their functions live in their database.
+   */
+  router.post("/collaborators/:slug/edge", async (req, res) => {
+    const { slug } = req.params;
+    const body = req.body ?? {};
+    const pool = await poolFor(req, res);
+    if (!pool) return;
+    try {
+      if (body.name === undefined) return res.json({ slug, functions: await edge.list(pool) });
+      if (body.source !== undefined) {
+        return res.json({ slug, ...(await edge.save(pool, body.name, body.source)) });
+      }
+      if (body.publish === true) return res.json({ slug, ...(await edge.publish(pool, body.name)) });
+      if (body.secrets !== undefined) {
+        return res.json({ slug, ...(await edge.setSecrets(pool, body.name, body.secrets, credentialsKey)) });
+      }
+      if (body.logs === true) {
+        return res.json({ slug, name: body.name, invocations: await edge.logs(pool, body.name) });
+      }
+      return res.status(400).json({
+        error: "body must be {}, { name, source }, { name, publish: true }, { name, secrets } or { name, logs: true }",
+      });
+    } catch (err) {
+      // The compiler's verdict travels whole, so the editor can point at it.
+      if (err instanceof edge.CompileError) {
+        return res.status(400).json({ error: err.message, text: err.text, line: err.line, column: err.column });
+      }
+      if (err instanceof edge.InvalidFunctionInput) return res.status(400).json({ error: err.message });
+      if (err instanceof edge.UnknownFunction) return res.status(404).json({ error: err.message });
+      if (isPostgresError(err)) return res.status(422).json({ error: err.message, code: err.code });
+      throw err;
+    }
+  });
+
+  // The registry routes, and the only ones that use the admin pool for data:
+  // an origin and a ticket have to be resolved BEFORE anyone knows the slug, so
+  // they live in `stl_mcp` and never open a collaborator's pool.
+  function registrySlug(value, res) {
+    if (!isValidSlug(value)) {
+      res.status(400).json({ error: "slug must match ^[a-z][a-z0-9_]{1,30}$" });
+      return null;
+    }
+    return value;
+  }
+
+  function registryFailure(err, res) {
+    if (err instanceof origins.OriginTaken) return res.status(409).json({ error: err.message, slug: err.slug });
+    if (err instanceof origins.InvalidOrigin) return res.status(400).json({ error: err.message });
+    if (err instanceof tickets.TicketReused) return res.status(409).json({ error: err.message });
+    if (err instanceof tickets.InvalidTicket) return res.status(400).json({ error: err.message });
+    throw err;
+  }
+
+  router.get("/origins/resolve", async (req, res) => {
+    const slug = await origins.slugFor(adminPool, req.query.origin);
+    if (!slug) return res.status(404).json({ error: "origin not registered" });
+    res.json({ origin: req.query.origin, slug });
+  });
+
+  router.get("/origins", async (req, res) => {
+    const slug = registrySlug(req.query.slug, res);
+    if (!slug) return;
+    res.json({ slug, origins: await origins.listFor(adminPool, slug) });
+  });
+
+  router.post("/origins", async (req, res) => {
+    const slug = registrySlug(req.body?.slug, res);
+    if (!slug) return;
+    try {
+      const added = await origins.add(adminPool, slug, req.body?.origin);
+      res.status(added.created ? 201 : 200).json(added);
+    } catch (err) {
+      registryFailure(err, res);
+    }
+  });
+
+  router.delete("/origins", async (req, res) => {
+    const slug = registrySlug(req.body?.slug, res);
+    if (!slug) return;
+    try {
+      res.json(await origins.remove(adminPool, slug, req.body?.origin));
+    } catch (err) {
+      registryFailure(err, res);
+    }
+  });
+
+  // 204 or 409: the platform turns the conflict into a 401, so whoever replays
+  // a ticket learns nothing from the difference.
+  router.post("/tickets/consume", async (req, res) => {
+    try {
+      await tickets.consume(adminPool, req.body?.jti, req.body?.expiresAt);
+      res.status(204).end();
+    } catch (err) {
+      registryFailure(err, res);
+    }
   });
 
   return router;
