@@ -66,8 +66,8 @@ services:
   # Our own MCP server (../../mcp-server): the collaborator reaches their database
   # through it, and the connection string never leaves this container.
   mcp:
-    image: stl-supabase-mcp:${MCP_IMAGE_TAG:-0.2.0}
-    container_name: stl-supabase-mcp
+    image: stl-buildloop-mcp:${MCP_IMAGE_TAG:-0.2.0}
+    container_name: stl-buildloop-mcp
     restart: unless-stopped
     mem_limit: 192m
     environment:

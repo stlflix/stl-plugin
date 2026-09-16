@@ -6,7 +6,7 @@ O *porquê* está em `docs/decisions/005-mcp-proprio-para-o-supabase-do-ops.md` 
 - **Host**: `ubuntu@166.0.186.190` (`mkt-vps`), chave `~/.ssh/id_ed25519_stlflix_vps`
 - **Diretório**: `/home/ubuntu/supabase-ops/` — `supabase/docker/` é o sparse-clone
   do compose oficial, este overlay vai em cima dele; `mcp-src/` é a cópia de
-  `../../mcp-server` que vira a imagem `stl-supabase-mcp`
+  `../../mcp-server` que vira a imagem `stl-buildloop-mcp`
 - **Superfícies**: `https://db.stlflix.com.br/mcp` (MCP, bearer) ·
   `https://db.stlflix.com.br` (Studio, sessão da plataforma) · loopback
   `5433` (Postgres) e `8100` (envoy) por túnel SSH · `8200/admin` só na rede docker
@@ -19,7 +19,7 @@ git clone --filter=blob:none --no-checkout --depth 1 https://github.com/supabase
 git -C supabase sparse-checkout init --cone && git -C supabase sparse-checkout set docker && git -C supabase checkout
 python3 gen-env.py                                   # .env com segredos fortes, chmod 600, recusa sobrescrever
 cp docker-compose.override.yml supabase/docker/      # este arquivo
-docker build -t stl-supabase-mcp:0.2.0 mcp-src       # ../../mcp-server copiado para cá
+docker build -t stl-buildloop-mcp:0.2.0 mcp-src       # ../../mcp-server copiado para cá
 cd supabase/docker && docker compose up -d db meta rest auth studio api-gw mcp
 ```
 
@@ -54,5 +54,5 @@ um em `.com.br` nasce com ele. É trocar `STUDIO_HOST` no `.env`.
 
 ```bash
 rsync -a --delete --exclude node_modules ~/Projetos/stl-plugin/mcp-server/ mkt-vps:/home/ubuntu/supabase-ops/mcp-src/
-ssh mkt-vps 'cd /home/ubuntu/supabase-ops && docker build -t stl-supabase-mcp:<tag> mcp-src && sed -i "s/^MCP_IMAGE_TAG=.*/MCP_IMAGE_TAG=<tag>/" supabase/docker/.env && cd supabase/docker && docker compose up -d mcp'
+ssh mkt-vps 'cd /home/ubuntu/supabase-ops && docker build -t stl-buildloop-mcp:<tag> mcp-src && sed -i "s/^MCP_IMAGE_TAG=.*/MCP_IMAGE_TAG=<tag>/" supabase/docker/.env && cd supabase/docker && docker compose up -d mcp'
 ```

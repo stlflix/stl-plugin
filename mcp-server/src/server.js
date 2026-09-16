@@ -44,7 +44,7 @@ const tools = defineTools({ pools });
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 function buildServer(slug) {
-  const server = new Server({ name: "stl-supabase", version: "0.3.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "stl-buildloop", version: "0.4.0-dev" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })),
@@ -82,7 +82,7 @@ app.post("/mcp", async (req, res) => {
   const token = bearerFrom(req.get("authorization"));
   const slug = token ? await store.slugForTokenHash(hashToken(token)) : null;
   if (!slug) {
-    res.setHeader("WWW-Authenticate", 'Bearer realm="stl-supabase"');
+    res.setHeader("WWW-Authenticate", 'Bearer realm="stl-buildloop"');
     return res.status(401).json({ error: "unknown or missing bearer token" });
   }
 
@@ -111,7 +111,7 @@ await store.ensureSchema();
 await hardenSharedDatabases(adminPool);
 
 const listener = app.listen(config.port, "0.0.0.0", async () =>
-  console.log(`stl-supabase MCP listening on ${config.port} for ${await store.count()} collaborator(s)`),
+  console.log(`stl-buildloop MCP listening on ${config.port} for ${await store.count()} collaborator(s)`),
 );
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
