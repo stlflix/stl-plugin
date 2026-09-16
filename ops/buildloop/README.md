@@ -89,3 +89,34 @@ lados **antes** de qualquer troca, e aborta se divergir (BL-08).
 ```bash
 docker compose -f docker-compose.yml config >/dev/null   # valida offline, sem daemon
 ```
+
+## Cutover executado — 2026-09-16
+
+Checklist do T49 da feature `buildloop-studio`, como saiu na hora:
+
+- **Ok do Lucas** na sessão para o cutover e o deploy; dados do cluster antigo eram
+  de teste, então **não houve migração**: cluster novo do zero, `compare-counts`
+  não se aplica. Volumes do Supabase preservados (`docker volume ls | grep supabase`),
+  para remover à mão depois de 7 dias; `/home/ubuntu/supabase-ops/` ficou no disco.
+- Imagens construídas no host: `stl-buildloop-mcp:0.4.0` (339 MB) e
+  `stl-buildloop-functions:0.1.0` (245 MB), a partir da `main` do `stl-plugin`.
+- `gen-env.py` gerou o `.env`; `MCP_ADMIN_KEY` foi trocada pela chave que a
+  plataforma já usava; `BUILDLOOP_HOST=db.stlflix.com.br` (só `/mcp`) e
+  `BUILDLOOP_FN_HOST=db.stlflix.com` — **o registro DNS na zona `.com` ainda não
+  existe**, então `/fn/` e `/auth/jwks` seguem inalcançáveis de fora até o Lucas
+  criá-lo. `AUTH_PRIVATE_KEY` copiada para o `productops-web` como
+  `BUILDLOOP_AUTH_PRIVATE_KEY` (a que estava lá não era uma chave ES256).
+- `docker compose down` da stack `supabase` (7 containers) e `docker image rm`
+  de `supabase/*`, `postgrest/*`, `envoyproxy/envoy` e `stl-supabase-mcp`.
+- `docker compose up -d`: `buildloop-db` healthy, `/healthz` do MCP
+  `{"ok":true,"collaborators":0}`, `/healthz` do runtime `{"ok":true}`,
+  `/auth/jwks` devolve `EC P-256`. `docker ps`: `postgres:16`,
+  `stl-buildloop-mcp:0.4.0`, `stl-buildloop-functions:0.1.0`; zero `supabase/*`.
+- Público: `https://db.stlflix.com.br/mcp` → GET 405, POST 401 (o MCP novo);
+  `/auth/jwks` no host `.com.br` → 404 (não roteado, de propósito).
+- Plataforma: `.env` do `productops-web` reescrito (`BUILDLOOP_*`, backup
+  `.env.bak-20260916-191728`), imagem `sha-850ce51` (build-image.yml, run
+  35139458838) deployada por `deploy/deploy.sh`, healthy; `/api/buildloop/auth/exchange`
+  POST → 401 `{"success":false}` (chave privada carregou), GET → 405.
+- Colaboradores: o registro `stl_mcp` nasceu vazio — cada um recria o banco e o
+  token pelo módulo BuildLoop; a URL do MCP não mudou.
