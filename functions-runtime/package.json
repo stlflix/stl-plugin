@@ -1,6 +1,6 @@
 {
   "name": "stl-buildloop-functions",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "BuildLoop functions runtime: runs a collaborator's edge functions in a child process that holds no credential at all.",
