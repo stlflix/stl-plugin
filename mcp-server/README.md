@@ -50,6 +50,11 @@ docker build -t stl-buildloop-mcp .
 | `ADMIN_DB_URL` | — | `postgres://<admin>:…@db:5432/postgres` (required) |
 | `ADMIN_KEY` | — | shared secret for `/admin/*` (required) |
 | `CREDENTIALS_KEY` | — | 64 hex chars; encrypts role passwords at rest (required) |
+| `RUNTIME_KEY` | — | shared secret for `/admin/runtime/*`, the functions runtime's own key (required) |
+| `FUNCTIONS_URL` | `http://functions:8300` | where published functions answer |
 | `STATEMENT_TIMEOUT_MS` | `30000` | per-statement timeout |
+
+Anything else is ignored, and an env matching `N8N`, `PLATFORM`, `PRODUCTOPS`
+or `JWT_SECRET` stops the server: this cluster never reaches the platform (I1).
 
 The ops stack that runs this lives in `../ops/buildloop/`.

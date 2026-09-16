@@ -5,28 +5,15 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { adminRouter } from "./admin.js";
 import { bearerFrom, hashToken } from "./auth.js";
-import { loadKey } from "./crypto.js";
+import { loadConfig } from "./config.js";
 import { PoolRegistry } from "./db.js";
 import { hardenSharedDatabases } from "./provision.js";
+import { runtimeRouter } from "./runtime-api.js";
 import { CollaboratorStore } from "./store.js";
 import { defineTools } from "./tools.js";
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
-
-const config = {
-  port: Number(process.env.PORT ?? 8200),
-  dbHost: process.env.DB_HOST ?? "db",
-  dbPort: Number(process.env.DB_PORT ?? 5432),
-  statementTimeoutMs: Number(process.env.STATEMENT_TIMEOUT_MS ?? 30_000),
-  // supabase_admin on the shared database: provisioning and the registry.
-  adminDbUrl: required("ADMIN_DB_URL"),
-  adminKey: required("ADMIN_KEY"),
-  credentialsKey: loadKey(required("CREDENTIALS_KEY")),
-};
+// By allowlist, and never with an env that belongs to the platform (I1).
+const config = loadConfig();
 
 const adminUrl = new URL(config.adminDbUrl);
 const adminConnection = {
@@ -76,7 +63,16 @@ app.get("/healthz", async (_req, res) => {
   }
 });
 
-app.use("/admin", adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, credentialsKey: config.credentialsKey, store, pools }));
+// The runtime's own surface is mounted first: `/admin/runtime/*` belongs to the
+// runtime key alone, and never falls through to the admin key's router.
+app.use(
+  "/admin/runtime",
+  runtimeRouter({ runtimeKey: config.runtimeKey, credentialsKey: config.credentialsKey, store, pools }),
+);
+app.use(
+  "/admin",
+  adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, credentialsKey: config.credentialsKey, store, pools }),
+);
 
 app.post("/mcp", async (req, res) => {
   const token = bearerFrom(req.get("authorization"));
