@@ -257,8 +257,10 @@ export function defineTools({ pools, adminPool, credentialsKey, functionsUrl = "
         },
         required: ["name", "source"],
       },
+      // Writes to the `buildloop` schema go through the admin role on the
+      // slug's own database — the slug has SELECT there and nothing more (AD-009).
       handler: async (slug, { name, source }) => {
-        const pool = await pools.forSlug(slug);
+        const pool = await pools.adminForSlug(slug);
         await edge.save(pool, name, source);
         return edge.publish(pool, name);
       },
@@ -300,7 +302,7 @@ export function defineTools({ pools, adminPool, credentialsKey, functionsUrl = "
         },
         required: ["name", "secrets"],
       },
-      handler: async (slug, { name, secrets }) => edge.setSecrets(await pools.forSlug(slug), name, secrets, credentialsKey),
+      handler: async (slug, { name, secrets }) => edge.setSecrets(await pools.adminForSlug(slug), name, secrets, credentialsKey),
     },
     {
       name: "list_allowed_origins",

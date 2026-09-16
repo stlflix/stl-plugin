@@ -26,7 +26,15 @@ const adminPool = new pg.Pool({ connectionString: config.adminDbUrl, max: 3 });
 adminPool.on("error", (err) => console.error(`[admin pool] ${err.message}`));
 
 const store = new CollaboratorStore(adminPool, config.credentialsKey);
-const pools = new PoolRegistry({ store, host: config.dbHost, port: config.dbPort, statementTimeoutMs: config.statementTimeoutMs });
+const pools = new PoolRegistry({
+  store,
+  host: config.dbHost,
+  port: config.dbPort,
+  statementTimeoutMs: config.statementTimeoutMs,
+  // The same identity provisioning already uses inside a collaborator's
+  // database: it owns the `buildloop` schema, so it is what writes there (AD-009).
+  adminConnection,
+});
 const tools = defineTools({
   pools,
   adminPool,

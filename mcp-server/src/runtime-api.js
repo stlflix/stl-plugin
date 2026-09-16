@@ -43,7 +43,9 @@ export function runtimeRouter({ runtimeKey, credentialsKey, store, pools }) {
       throw err;
     }
     if (!(await store.get(slug))) return res.status(404).json({ error: "not provisioned" });
-    const published = await bundleFor(await pools.forSlug(slug), name, credentialsKey);
+    // The admin role inside the slug's database: `edge_function_secrets` is
+    // revoked from the slug itself, so its own pool could not read this (AD-009).
+    const published = await bundleFor(await pools.adminForSlug(slug), name, credentialsKey);
     if (!published) return res.status(404).json({ error: `no published version of '${name}'` });
     res.json({ slug, ...published });
   });

@@ -198,25 +198,33 @@ export function adminRouter({
 
   /**
    * One route, five operations, told apart by the shape of the body — the same
-   * multiplexing the Studio's panel speaks. Every one of them runs on the
-   * collaborator's own pool: their functions live in their database.
+   * multiplexing the Studio's panel speaks. All five stay inside the
+   * collaborator's own database; what changes is WHO writes there (AD-009).
+   * Reading is the slug's own right — `SELECT` on `edge_functions`,
+   * `edge_function_versions` and `invocations` is granted to it. Writing is
+   * not: a published version is an audit trail the slug must not rewrite, and
+   * `edge_function_secrets` is revoked from everyone but the admin role. So
+   * `list` and `logs` open the slug's pool, and `save`, `publish` and
+   * `setSecrets` open the admin pool ON THE SLUG'S DATABASE.
    */
   router.post("/collaborators/:slug/edge", async (req, res) => {
     const { slug } = req.params;
     const body = req.body ?? {};
-    const pool = await poolFor(req, res);
-    if (!pool) return;
+    if (!(await store.get(slug))) return res.status(404).json({ error: "not provisioned" });
     try {
-      if (body.name === undefined) return res.json({ slug, functions: await edge.list(pool) });
+      if (body.name === undefined) return res.json({ slug, functions: await edge.list(await pools.forSlug(slug)) });
       if (body.source !== undefined) {
-        return res.json({ slug, ...(await edge.save(pool, body.name, body.source)) });
+        return res.json({ slug, ...(await edge.save(await pools.adminForSlug(slug), body.name, body.source)) });
       }
-      if (body.publish === true) return res.json({ slug, ...(await edge.publish(pool, body.name)) });
+      if (body.publish === true) return res.json({ slug, ...(await edge.publish(await pools.adminForSlug(slug), body.name)) });
       if (body.secrets !== undefined) {
-        return res.json({ slug, ...(await edge.setSecrets(pool, body.name, body.secrets, credentialsKey)) });
+        return res.json({
+          slug,
+          ...(await edge.setSecrets(await pools.adminForSlug(slug), body.name, body.secrets, credentialsKey)),
+        });
       }
       if (body.logs === true) {
-        return res.json({ slug, name: body.name, invocations: await edge.logs(pool, body.name) });
+        return res.json({ slug, name: body.name, invocations: await edge.logs(await pools.forSlug(slug), body.name) });
       }
       return res.status(400).json({
         error: "body must be {}, { name, source }, { name, publish: true }, { name, secrets } or { name, logs: true }",

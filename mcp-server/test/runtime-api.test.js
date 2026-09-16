@@ -41,7 +41,14 @@ const store = {
 };
 
 const adminPool = new Proxy({}, { get: (_t, prop) => { throw new Error(`adminPool touched: ${String(prop)}`); } });
-const pools = { forSlug: async (slug) => (forSlugCalls.push(slug), pool) };
+const adminForSlugCalls = [];
+const pools = {
+  // The bundle and its secrets are read with the admin role INSIDE the slug's
+  // database (AD-009): `edge_function_secrets` is revoked from the slug, so its
+  // own pool could not read what the runtime asks for.
+  forSlug: async (slug) => (forSlugCalls.push(slug), pool),
+  adminForSlug: async (slug) => (adminForSlugCalls.push(slug), pool),
+};
 
 let server;
 let base;
@@ -106,12 +113,14 @@ test("credential answers 404 for a slug with no execution role yet, and 400 for 
 
 test("function answers the published version, its bundle and the secrets decrypted", async () => {
   const before = forSlugCalls.length;
+  const beforeAdmin = adminForSlugCalls.length;
   const { status, body } = await post("/admin/runtime/function/alice/hello", { "X-Runtime-Key": RUNTIME_KEY });
   assert.equal(status, 200);
   assert.equal(body.version, 3);
   assert.match(body.bundle, /new Response/);
   assert.deepEqual(body.secrets, { TOKEN: "t0p" });
-  assert.deepEqual(forSlugCalls.slice(before), ["alice"], "read through the collaborator's own pool");
+  assert.deepEqual(adminForSlugCalls.slice(beforeAdmin), ["alice"], "read with the admin role, in the slug's database");
+  assert.equal(forSlugCalls.length, before, "the slug's own role cannot read its secrets");
 });
 
 test("function answers 404 for a function with no published version and for an unprovisioned slug", async () => {
@@ -121,10 +130,12 @@ test("function answers 404 for a function with no published version and for an u
 
 test("function refuses a name outside the pattern with 400 before opening a pool", async () => {
   const before = forSlugCalls.length;
+  const beforeAdmin = adminForSlugCalls.length;
   const { status, body } = await post("/admin/runtime/function/alice/Hello", { "X-Runtime-Key": RUNTIME_KEY });
   assert.equal(status, 400);
   assert.match(body.error, /name must match/);
   assert.equal(forSlugCalls.length, before);
+  assert.equal(adminForSlugCalls.length, beforeAdmin);
 });
 
 test("nothing else exists behind the runtime key", async () => {

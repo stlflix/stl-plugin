@@ -497,6 +497,7 @@ function registryPool() {
 
 const edgeDb = buildloopPool();
 const edgeForSlugCalls = [];
+const edgeAdminForSlugCalls = [];
 const registry = registryPool();
 const registryForSlugCalls = [];
 
@@ -516,7 +517,10 @@ before(async () => {
       adminConnection: {},
       credentialsKey: CREDENTIALS_KEY,
       store,
-      pools: { forSlug: async (slug) => (edgeForSlugCalls.push(slug), edgeDb.pool) },
+      pools: {
+        forSlug: async (slug) => (edgeForSlugCalls.push(slug), edgeDb.pool),
+        adminForSlug: async (slug) => (edgeAdminForSlugCalls.push(slug), edgeDb.pool),
+      },
     }),
   );
   edgeApp.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
@@ -573,14 +577,17 @@ test("edge refuses a missing or wrong admin key with 401, and a bad slug with 40
   assert.equal(bad.status, 400);
   assert.match(bad.body.error, /slug must match/);
   assert.equal(edgeForSlugCalls.length, before, "no pool was opened");
+  assert.equal(edgeAdminForSlugCalls.length, 0, "no admin pool was opened");
 });
 
 test("edge answers 404 for an unprovisioned slug without opening a pool", async () => {
   const before = edgeForSlugCalls.length;
+  const beforeAdmin = edgeAdminForSlugCalls.length;
   const { status, body } = await send("POST", "/collaborators/bob/edge", {}, edgeBase);
   assert.equal(status, 404);
   assert.equal(body.error, "not provisioned");
   assert.equal(edgeForSlugCalls.length, before);
+  assert.equal(edgeAdminForSlugCalls.length, beforeAdmin);
 });
 
 test("edge with an empty body lists the functions of that collaborator", async () => {
@@ -651,6 +658,38 @@ test("the edge route never touches the adminPool", async () => {
     assert.equal(res.status, 200);
     assert.ok(!JSON.stringify(res.body).includes("adminPool touched"));
   }
+});
+
+/**
+ * AD-009: the slug owns `public`, not `buildloop`. It is granted SELECT on its
+ * functions, versions and invocations and NOTHING on its secrets, so reading is
+ * its own right and writing is the admin role's — inside the slug's database
+ * either way. A write that went through `forSlug` would be denied by Postgres
+ * the moment a real cluster is behind this route.
+ */
+test("publishing and setting a secret open the admin pool of the slug, never the slug's own", async () => {
+  const own = edgeForSlugCalls.length;
+  const admin = edgeAdminForSlugCalls.length;
+
+  await send("POST", "/collaborators/alice/edge", { name: "audited", source: HELLO }, edgeBase);
+  const published = await send("POST", "/collaborators/alice/edge", { name: "audited", publish: true }, edgeBase);
+  assert.equal(published.status, 200);
+  const secrets = await send("POST", "/collaborators/alice/edge", { name: "audited", secrets: { TOKEN: "t0p" } }, edgeBase);
+  assert.equal(secrets.status, 200);
+
+  assert.deepEqual(edgeAdminForSlugCalls.slice(admin), ["alice", "alice", "alice"], "save, publish and secrets");
+  assert.equal(edgeForSlugCalls.length, own, "the collaborator's own pool was never opened for a write");
+});
+
+test("listing and reading logs open the slug's own pool, never the admin one", async () => {
+  const own = edgeForSlugCalls.length;
+  const admin = edgeAdminForSlugCalls.length;
+
+  assert.equal((await send("POST", "/collaborators/alice/edge", {}, edgeBase)).status, 200);
+  assert.equal((await send("POST", "/collaborators/alice/edge", { name: "audited", logs: true }, edgeBase)).status, 200);
+
+  assert.deepEqual(edgeForSlugCalls.slice(own), ["alice", "alice"], "list and logs");
+  assert.equal(edgeAdminForSlugCalls.length, admin, "a read never reaches for the admin role");
 });
 
 test("the registry routes refuse a missing or wrong admin key with 401", async () => {

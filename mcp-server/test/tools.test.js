@@ -29,7 +29,7 @@ function harness(answer = () => ({ rows: [] }), { adminPool, fetchImpl, function
     },
   };
   const tools = defineTools({
-    pools: { forSlug: async () => pool },
+    pools: { forSlug: async () => pool, adminForSlug: async () => pool },
     adminPool,
     credentialsKey: CREDENTIALS_KEY,
     functionsUrl,
