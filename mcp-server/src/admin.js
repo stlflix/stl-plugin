@@ -1,8 +1,19 @@
 import { randomBytes } from "node:crypto";
 import express from "express";
 import { hashToken, isValidSlug, secretEquals } from "./auth.js";
-import { DESCRIBE_SQL, LIST_TABLES_SQL } from "./catalog.js";
-import { provisionCollaborator } from "./provision.js";
+import {
+  DESCRIBE_SQL,
+  FUNCTIONS_SQL,
+  FUNCTION_DEF_SQL,
+  LIST_TABLES_SQL,
+  POLICIES_SQL,
+  RLS_STATE_SQL,
+  rowsToFunctions,
+  rowsToRlsState,
+  runLints,
+} from "./catalog.js";
+import { ExecConflict, InvalidExecInput, SqlRejected, runExec } from "./mutations.js";
+import { provisionCollaborator, upgradeCollaborator } from "./provision.js";
 import { InvalidQueryInput, isPostgresError, parseQueryInput, runReadOnly } from "./readonly.js";
 
 /**
@@ -10,8 +21,26 @@ import { InvalidQueryInput, isPostgresError, parseQueryInput, runReadOnly } from
  * Authenticated by a shared secret in `X-Admin-Key`; never reachable through
  * Traefik — the public router only forwards `/mcp`.
  */
-export function adminRouter({ adminKey, adminPool, adminConnection, store, pools }) {
+export function adminRouter({
+  adminKey,
+  adminPool,
+  adminConnection,
+  store,
+  pools,
+  // The two calls that need the admin role are injected so a test can prove
+  // which routes reach for it — and which never do.
+  provision = { provisionCollaborator, upgradeCollaborator },
+}) {
   const router = express.Router();
+
+  /** Every data route answers 404 before a pool is opened, never after. */
+  async function poolFor(req, res) {
+    if (!(await store.get(req.params.slug))) {
+      res.status(404).json({ error: "not provisioned" });
+      return null;
+    }
+    return pools.forSlug(req.params.slug);
+  }
 
   router.use((req, res, next) => {
     if (!secretEquals(req.get("x-admin-key"), adminKey)) {
@@ -35,7 +64,7 @@ export function adminRouter({ adminKey, adminPool, adminConnection, store, pools
   router.put("/collaborators/:slug", async (req, res) => {
     const { slug } = req.params;
     const email = typeof req.body?.email === "string" ? req.body.email : null;
-    const { password, fnPassword, dbName, created } = await provisionCollaborator(adminPool, adminConnection, slug);
+    const { password, fnPassword, dbName, created } = await provision.provisionCollaborator(adminPool, adminConnection, slug);
     await store.upsert({ slug, email, dbName, password, fnPassword });
     await pools.drop(slug);
     res.status(created ? 201 : 200).json({ ...present(await store.get(slug)), created });
@@ -89,6 +118,78 @@ export function adminRouter({ adminKey, adminPool, adminConnection, store, pools
       if (!isPostgresError(err)) throw err;
       res.status(422).json({ error: err.message, code: err.code });
     }
+  });
+
+  // Writes on the platform's behalf (I7): with the collaborator's OWN role, in
+  // one transaction, never with `adminPool`. What the database refuses, the
+  // platform shows as text.
+  router.post("/collaborators/:slug/exec", async (req, res) => {
+    const { slug } = req.params;
+    const pool = await poolFor(req, res);
+    if (!pool) return;
+    try {
+      const results = await runExec(pool, req.body?.statements, { timeoutMs: req.body?.timeoutMs });
+      res.json({ slug, results });
+    } catch (err) {
+      if (err instanceof InvalidExecInput) return res.status(400).json({ error: err.message });
+      // Nothing was applied: the row moved under the client.
+      if (err instanceof ExecConflict) {
+        return res.status(409).json({ error: err.message, index: err.index, expected: err.expected, got: err.got });
+      }
+      if (err instanceof SqlRejected) return res.status(422).json({ error: err.message, code: err.code });
+      throw err;
+    }
+  });
+
+  // `{}` lists the functions, `{ oid }` asks Postgres to re-print one of them —
+  // the definition always comes from the database, never from the text sent in.
+  router.post("/collaborators/:slug/functions", async (req, res) => {
+    const { slug } = req.params;
+    const { oid } = req.body ?? {};
+    if (oid !== undefined && (!Number.isInteger(oid) || oid <= 0)) {
+      return res.status(400).json({ error: "oid must be a positive integer" });
+    }
+    const pool = await poolFor(req, res);
+    if (!pool) return;
+    if (oid === undefined) {
+      const { rows } = await pool.query(FUNCTIONS_SQL);
+      return res.json({ slug, functions: rowsToFunctions(rows) });
+    }
+    try {
+      const { rows } = await pool.query(FUNCTION_DEF_SQL, [oid]);
+      const definition = rows[0]?.definition ?? null;
+      if (!definition) return res.status(404).json({ error: `no function with oid ${oid} in this database` });
+      return res.json({ slug, oid, definition });
+    } catch (err) {
+      if (!isPostgresError(err)) throw err;
+      return res.status(404).json({ error: `no function with oid ${oid} in this database` });
+    }
+  });
+
+  router.post("/collaborators/:slug/policies", async (req, res) => {
+    const { slug } = req.params;
+    const pool = await poolFor(req, res);
+    if (!pool) return;
+    const state = await pool.query(RLS_STATE_SQL);
+    const policies = await pool.query(POLICIES_SQL);
+    res.json({ slug, tables: rowsToRlsState(state.rows, policies.rows) });
+  });
+
+  router.post("/collaborators/:slug/lint", async (req, res) => {
+    const { slug } = req.params;
+    const pool = await poolFor(req, res);
+    if (!pool) return;
+    res.json({ slug, checkedAt: new Date().toISOString(), findings: await runLints(pool) });
+  });
+
+  // The one data-plane route that needs the admin role: only it can create a
+  // role or a schema owned by someone other than the collaborator.
+  router.post("/collaborators/:slug/upgrade", async (req, res) => {
+    const { slug } = req.params;
+    if (!(await store.get(slug))) return res.status(404).json({ error: "not provisioned" });
+    const { fnPassword } = await provision.upgradeCollaborator(adminPool, adminConnection, slug);
+    await store.setFnPassword(slug, fnPassword);
+    res.json({ slug, upgraded: true });
   });
 
   return router;
