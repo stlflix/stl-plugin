@@ -35,8 +35,8 @@ export function adminRouter({ adminKey, adminPool, adminConnection, store, pools
   router.put("/collaborators/:slug", async (req, res) => {
     const { slug } = req.params;
     const email = typeof req.body?.email === "string" ? req.body.email : null;
-    const { password, dbName, created } = await provisionCollaborator(adminPool, adminConnection, slug);
-    await store.upsert({ slug, email, dbName, password });
+    const { password, fnPassword, dbName, created } = await provisionCollaborator(adminPool, adminConnection, slug);
+    await store.upsert({ slug, email, dbName, password, fnPassword });
     await pools.drop(slug);
     res.status(created ? 201 : 200).json({ ...present(await store.get(slug)), created });
   });
