@@ -1,110 +1,85 @@
 #!/usr/bin/env python3
-"""Generate a hardened .env for the STLFLIX ops self-hosted Supabase stack."""
-import base64, hashlib, hmac, json, secrets, sys, time, pathlib
+"""Generate the .env of the BuildLoop stack: seven values, none of them typed by hand.
 
-DOCKER = pathlib.Path("/home/ubuntu/supabase-ops/supabase/docker")
-ENV = DOCKER / ".env"
-if ENV.exists():
-    sys.exit(f"refusing to overwrite existing {ENV}")
+Usage: gen-env.py [directory]   (default: the directory of this script)
 
-def b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+It refuses to overwrite an existing .env. Regenerating would change
+POSTGRES_PASSWORD under a live database and MCP_CREDENTIALS_KEY under the
+encrypted role passwords — every collaborator would lose their credential at
+once. Rotating is a deliberate act, not a re-run.
+"""
+import pathlib
+import secrets
+import subprocess
+import sys
 
-def jwt(role: str, secret: str, years: int = 5) -> str:
-    now = int(time.time())
-    header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    payload = b64(json.dumps(
-        {"role": role, "iss": "supabase", "iat": now, "exp": now + years * 31536000},
-        separators=(",", ":"),
-    ).encode())
-    signing_input = f"{header}.{payload}".encode()
-    sig = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-    return f"{header}.{payload}.{b64(sig)}"
+BUILDLOOP_HOST = "db.stlflix.com"
 
-STUDIO_HOST = "db.stlflix.com.br"
-dashboard_user, dashboard_pass = "stlflix", secrets.token_urlsafe(24)
-jwt_secret = secrets.token_hex(32)          # 64 chars, >= 32 required
-values = {
-    "COMPOSE_FILE": "docker-compose.yml:docker-compose.override.yml",
-    "POSTGRES_PASSWORD": secrets.token_hex(24),
-    "JWT_SECRET": jwt_secret,
-    "ANON_KEY": jwt("anon", jwt_secret),
-    "SERVICE_ROLE_KEY": jwt("service_role", jwt_secret),
-    "SUPABASE_PUBLISHABLE_KEY": "",
-    "SUPABASE_SECRET_KEY": "",
-    "JWT_KEYS": "",
-    "JWT_JWKS": "",
-    "ANON_KEY_ASYMMETRIC": "",
-    "SERVICE_ROLE_KEY_ASYMMETRIC": "",
-    "DASHBOARD_USERNAME": dashboard_user,
-    "DASHBOARD_PASSWORD": dashboard_pass,
-    "SECRET_KEY_BASE": secrets.token_urlsafe(48),
-    "REALTIME_DB_ENC_KEY": secrets.token_hex(8),      # 16 chars
-    "VAULT_ENC_KEY": secrets.token_hex(16),           # 32 chars
-    "PG_META_CRYPTO_KEY": secrets.token_hex(16),      # 32 chars
-    "LOGFLARE_PUBLIC_ACCESS_TOKEN": secrets.token_hex(16),
-    "LOGFLARE_PRIVATE_ACCESS_TOKEN": secrets.token_hex(16),
-    "S3_PROTOCOL_ACCESS_KEY_ID": secrets.token_hex(16),
-    "S3_PROTOCOL_ACCESS_KEY_SECRET": secrets.token_hex(32),
-    # Phase 1 keeps every surface on loopback; Phase 3 swaps these for the subdomain.
-    "SUPABASE_PUBLIC_URL": f"https://{STUDIO_HOST}",
-    "API_EXTERNAL_URL": f"https://{STUDIO_HOST}/auth/v1",
-    "SITE_URL": f"https://{STUDIO_HOST}",
-    "ADDITIONAL_REDIRECT_URLS": "",
-    "POSTGRES_HOST": "db",
-    "POSTGRES_DB": "postgres",
-    "POSTGRES_PORT": "5432",
-    "POOLER_PROXY_PORT_TRANSACTION": "6543",
-    "POOLER_DEFAULT_POOL_SIZE": "20",
-    "POOLER_MAX_CLIENT_CONN": "100",
-    "POOLER_TENANT_ID": "stlflix-ops",
-    "POOLER_DB_POOL_SIZE": "5",
-    "STUDIO_DEFAULT_ORGANIZATION": "STLFLIX",
-    "STUDIO_DEFAULT_PROJECT": "ops",
-    "OPENAI_API_KEY": "",
-    "JWT_EXPIRY": "3600",
-    "DISABLE_SIGNUP": "false",
-    "MAILER_URLPATHS_CONFIRMATION": "/auth/v1/verify",
-    "MAILER_URLPATHS_INVITE": "/auth/v1/verify",
-    "MAILER_URLPATHS_RECOVERY": "/auth/v1/verify",
-    "MAILER_URLPATHS_EMAIL_CHANGE": "/auth/v1/verify",
-    "ENABLE_EMAIL_SIGNUP": "true",
-    # No SMTP on this box: autoconfirm keeps signup testable without mail.
-    "ENABLE_EMAIL_AUTOCONFIRM": "true",
-    "SMTP_ADMIN_EMAIL": "admin@stlflix.com",
-    "SMTP_HOST": "supabase-mail",
-    "SMTP_PORT": "2500",
-    "SMTP_USER": "fake_mail_user",
-    "SMTP_PASS": "fake_mail_password",
-    "SMTP_SENDER_NAME": "STLFLIX ops",
-    "ENABLE_ANONYMOUS_USERS": "false",
-    "ENABLE_PHONE_SIGNUP": "false",
-    "ENABLE_PHONE_AUTOCONFIRM": "false",
-    "GLOBAL_S3_BUCKET": "stub",
-    "REGION": "stub",
-    "MINIO_ROOT_USER": "supa-storage",
-    "MINIO_ROOT_PASSWORD": secrets.token_hex(16),
-    "STORAGE_TENANT_ID": "stub",
-    "FUNCTIONS_VERIFY_JWT": "false",
-    "PGRST_DB_SCHEMAS": "public,graphql_public",
-    "PGRST_DB_MAX_ROWS": "1000",
-    "PGRST_DB_EXTRA_SEARCH_PATH": "public",
-    "DOCKER_SOCKET_LOCATION": "/var/run/docker.sock",
-    "GOOGLE_PROJECT_ID": "",
-    "GOOGLE_PROJECT_NUMBER": "",
-    "API_GW_HTTP_PORT": "8100",
-    "KONG_HTTP_PORT": "8100",
-    "KONG_HTTPS_PORT": "8443",
-    "IMGPROXY_AUTO_WEBP": "true",
-    "PROXY_DOMAIN": STUDIO_HOST,
-    "CERTBOT_EMAIL": "lucascunhamelo@gmail.com",
-    # --- ours (read by docker-compose.override.yml) ---
-    "STUDIO_HOST": STUDIO_HOST,
-    "STUDIO_BASIC_AUTH_B64": base64.b64encode(f"{dashboard_user}:{dashboard_pass}".encode()).decode(),
-    "MCP_ADMIN_KEY": secrets.token_urlsafe(32),
-    "MCP_CREDENTIALS_KEY": secrets.token_hex(32),
-    "MCP_IMAGE_TAG": "0.2.0",
-}
-ENV.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
-ENV.chmod(0o600)
-print(f"wrote {ENV} ({len(values)} vars)")
+KEY_ORDER = [
+    "BUILDLOOP_HOST",
+    "POSTGRES_PASSWORD",
+    "MCP_ADMIN_KEY",
+    "MCP_CREDENTIALS_KEY",
+    "RUNTIME_KEY",
+    "AUTH_PRIVATE_KEY",
+    "AUTH_PUBLIC_KEY",
+]
+
+
+def run(args: list[str], stdin: bytes | None = None) -> bytes:
+    """openssl, or nothing: a hand-rolled EC keypair is not worth the risk."""
+    result = subprocess.run(args, input=stdin, capture_output=True)
+    if result.returncode != 0:
+        sys.exit(f"{' '.join(args)} failed: {result.stderr.decode().strip()}")
+    return result.stdout
+
+
+def es256_pair() -> tuple[str, str]:
+    """P-256 (prime256v1) is the curve ES256 is defined over; PKCS8 is what `jose` reads."""
+    raw = run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout"])
+    private = run(["openssl", "pkcs8", "-topk8", "-nocrypt"], stdin=raw)
+    public = run(["openssl", "ec", "-pubout"], stdin=private)
+    return private.decode().strip(), public.decode().strip()
+
+
+def env_line(key: str, value: str) -> str:
+    # A PEM is several lines and a .env value is one: the newlines travel
+    # escaped, inside double quotes, which is what Compose un-escapes on the
+    # way in (and what `config.js` normalises again, so either behaviour works).
+    if "\n" in value:
+        return f'{key}="{value.replace(chr(10), chr(92) + "n")}"\n'
+    return f"{key}={value}\n"
+
+
+def main() -> None:
+    directory = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else __file__).resolve()
+    if directory.is_file():
+        directory = directory.parent
+    env_path = directory / ".env"
+    if env_path.exists():
+        sys.exit(f"refusing to overwrite existing {env_path}")
+
+    private, public = es256_pair()
+    values = {
+        "BUILDLOOP_HOST": BUILDLOOP_HOST,
+        # hex only: it goes inside a connection URI in the compose file.
+        "POSTGRES_PASSWORD": secrets.token_hex(24),
+        "MCP_ADMIN_KEY": secrets.token_urlsafe(32),
+        # 32 bytes as 64 hex characters: `crypto.js` refuses anything else.
+        "MCP_CREDENTIALS_KEY": secrets.token_hex(32),
+        "RUNTIME_KEY": secrets.token_urlsafe(32),
+        # The signing half belongs to the platform (BUILDLOOP_AUTH_PRIVATE_KEY),
+        # never to this stack: copy it there and delete nothing else.
+        "AUTH_PRIVATE_KEY": private,
+        "AUTH_PUBLIC_KEY": public,
+    }
+    assert list(values) == KEY_ORDER
+
+    env_path.write_text("".join(env_line(key, values[key]) for key in KEY_ORDER))
+    env_path.chmod(0o600)
+    print(f"wrote {env_path} ({len(values)} keys)")
+    print("copy AUTH_PRIVATE_KEY to the platform as BUILDLOOP_AUTH_PRIVATE_KEY: that is the only place it belongs")
+
+
+if __name__ == "__main__":
+    main()

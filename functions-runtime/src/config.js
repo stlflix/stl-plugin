@@ -70,7 +70,10 @@ export function loadConfig(env = process.env) {
   // answer 401 to every signed request and a JWKS of nothing.
   let authPublicKey;
   try {
-    authPublicKey = createPublicKey(env.AUTH_PUBLIC_KEY);
+    // A PEM is several lines and a .env value is one: `gen-env.py` escapes the
+    // newlines. Compose usually un-escapes them on the way in — usually, so the
+    // value is normalised here too and both shapes load.
+    authPublicKey = createPublicKey(env.AUTH_PUBLIC_KEY.replace(/\\n/g, "\n"));
   } catch (err) {
     throw new ConfigError(`AUTH_PUBLIC_KEY is not a public key in PEM form: ${err.message}`);
   }

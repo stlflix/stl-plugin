@@ -35,6 +35,9 @@ test("the three required variables are required, each named on its own", () => {
     assert.throws(() => loadConfig(env), new RegExp(`${name} is required`), name);
   }
   assert.throws(() => loadConfig({ ...base, AUTH_PUBLIC_KEY: "not a key" }), /AUTH_PUBLIC_KEY is not a public key/);
+  // How `gen-env.py` writes it: one line, newlines escaped.
+  const escaped = loadConfig({ ...base, AUTH_PUBLIC_KEY: PUBLIC_PEM.replace(/\n/g, "\\n") });
+  assert.equal(escaped.authPublicKey.asymmetricKeyType, "ec");
 });
 
 test("everything outside the allowlist is ignored, and the limits have defaults", () => {

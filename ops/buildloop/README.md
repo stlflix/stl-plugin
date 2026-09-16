@@ -1,58 +1,85 @@
-# Supabase self-hosted do ops (`mkt-vps`) — runbook
+# Stack BuildLoop no `mkt-vps` — runbook
 
-O *porquê* está em `docs/decisions/005-mcp-proprio-para-o-supabase-do-ops.md` e
-`006-…`. Isto é o *como*.
+O *porquê* está em `../../docs/decisions/005-…`, `006-…`, `008-…` e `009-…`.
+Isto é o *como*.
 
 - **Host**: `ubuntu@166.0.186.190` (`mkt-vps`), chave `~/.ssh/id_ed25519_stlflix_vps`
-- **Diretório**: `/home/ubuntu/supabase-ops/` — `supabase/docker/` é o sparse-clone
-  do compose oficial, este overlay vai em cima dele; `mcp-src/` é a cópia de
-  `../../mcp-server` que vira a imagem `stl-buildloop-mcp`
-- **Superfícies**: `https://db.stlflix.com.br/mcp` (MCP, bearer) ·
-  `https://db.stlflix.com.br` (Studio, sessão da plataforma) · loopback
-  `5433` (Postgres) e `8100` (envoy) por túnel SSH · `8200/admin` só na rede docker
+- **Diretório**: `/home/ubuntu/buildloop/` — este compose, o `.env`, e as cópias
+  de `mcp-server/` e `functions-runtime/` que viram as duas imagens
+- **Superfícies**: `https://<BUILDLOOP_HOST>/mcp` (MCP, bearer) ·
+  `https://<BUILDLOOP_HOST>/fn/<slug>/<nome>` e `/auth/jwks` (runtime) · loopback
+  `5433` (Postgres) e `8200` (MCP) por túnel SSH · `/admin` **não é roteado**
+
+Três containers, 1,4 GB de `mem_limit` somados. Postgres oficial: nenhuma
+imagem de fornecedor, nenhum serviço que não usamos.
+
+## Pré-condição de DNS — leia antes de subir
+
+`BUILDLOOP_HOST` **tem de estar na zona `stlflix.com`, ou com o proxy da
+Cloudflare desligado (DNS-only)**. Não é preferência: a zona `.com.br` tem
+*Cache Everything* na zona inteira (medido em 2026-09-11), e `/fn/<slug>/<nome>`
+responde **GET 200 com conteúdo autenticado do colaborador**. Numa zona que
+cacheia, a resposta de um usuário logado é servida ao anônimo seguinte — o mesmo
+vazamento do
+[AD-028 da plataforma](https://github.com/stlflix/plataforma-product-ops/blob/main/docs/decisions/028-toda-resposta-autenticada-de-api-entra-no-edge.md).
+
+O `Cache-Control: private, no-store` que o runtime envia é correto e **não
+fecha isso**: a chave de cache da zona não varia com o header. O que fecha é a
+zona.
+
+Enquanto o registro não existir, o acesso é por túnel SSH (`8200` MCP, `8300`
+runtime, `5433` Postgres):
+
+```bash
+ssh -N -L 8200:127.0.0.1:8200 -L 5433:127.0.0.1:5433 mkt-vps
+```
 
 ## Subir do zero
 
 ```bash
-mkdir -p /home/ubuntu/supabase-ops && cd /home/ubuntu/supabase-ops
-git clone --filter=blob:none --no-checkout --depth 1 https://github.com/supabase/supabase.git supabase
-git -C supabase sparse-checkout init --cone && git -C supabase sparse-checkout set docker && git -C supabase checkout
-python3 gen-env.py                                   # .env com segredos fortes, chmod 600, recusa sobrescrever
-cp docker-compose.override.yml supabase/docker/      # este arquivo
-docker build -t stl-buildloop-mcp:0.2.0 mcp-src       # ../../mcp-server copiado para cá
-cd supabase/docker && docker compose up -d db meta rest auth studio api-gw mcp
+mkdir -p /home/ubuntu/buildloop && cd /home/ubuntu/buildloop
+python3 gen-env.py .                 # 7 chaves, chmod 600, recusa sobrescrever
+rsync -a --delete --exclude node_modules ~/Projetos/stl-plugin/mcp-server/        mcp-src/
+rsync -a --delete --exclude node_modules ~/Projetos/stl-plugin/functions-runtime/ fn-src/
+docker build -t stl-buildloop-mcp:0.4.0       mcp-src
+docker build -t stl-buildloop-functions:0.1.0 fn-src
+docker compose up -d
 ```
 
-Só esses seis serviços do upstream: `realtime`, `storage`, `imgproxy`,
-`functions` e `supavisor` ficam de fora (RAM sem swap). Voltam com
-`docker compose up -d <serviço>`.
+Depois, **uma vez**: copie o `AUTH_PRIVATE_KEY` do `.env` para o
+`productops-web` como `BUILDLOOP_AUTH_PRIVATE_KEY`. É a única chave que assina
+identidade e ela mora só lá (I6) — esta stack fica com a metade pública.
+
+O `.env` **não é regenerável**: um `gen-env.py` novo trocaria o
+`POSTGRES_PASSWORD` sob um banco vivo e a `MCP_CREDENTIALS_KEY` sob as senhas
+cifradas de todos os colaboradores. Por isso ele recusa sobrescrever.
+
+## Atualizar uma imagem
+
+```bash
+rsync -a --delete --exclude node_modules ~/Projetos/stl-plugin/mcp-server/ mkt-vps:/home/ubuntu/buildloop/mcp-src/
+ssh mkt-vps 'cd /home/ubuntu/buildloop \
+  && docker build -t stl-buildloop-mcp:<tag> mcp-src \
+  && sed -i "s/^MCP_IMAGE_TAG=.*/MCP_IMAGE_TAG=<tag>/" .env \
+  && docker compose up -d mcp'
+```
+
+O runtime é igual, com `fn-src`, `stl-buildloop-functions` e
+`FUNCTIONS_IMAGE_TAG`. Se a variável não estiver no `.env`, o compose usa o
+padrão que está escrito nele (`0.4.0` / `0.1.0`).
 
 ## Colaborador novo
 
-Pela plataforma (módulo **Supabase**, projeto `supabase`) — é ela que chama a API
-admin do MCP. Na mão, do host: ver `../../mcp-server/README.md`.
+Pela plataforma (módulo **BuildLoop**) — é ela que chama a API admin do MCP. Na
+mão, do host: ver `../../mcp-server/README.md`.
 
-## DNS
+## Migração da stack antiga
 
-`db.stlflix.com.br` → proxy laranja da Cloudflare para esta máquina (SSL **Full**,
-não Full Strict: o TLS de origem é o self-signed do Traefik). Um nível só de
-subdomínio, para o certificado universal da Cloudflare cobrir.
+`scripts/migrate-from-supabase.sh` — ele confere a contagem de linhas dos dois
+lados **antes** de qualquer troca, e aborta se divergir (BL-08).
 
-**O registro ainda não existe** — os routers estão de pé e inertes; o Traefik
-responde 404 a host sem router, e sem DNS não chega pedido nenhum. Enquanto isso,
-o acesso é por túnel SSH (`8100` Studio, `8200` MCP, `5433` Postgres).
-
-**Se for possível criar na zona `stlflix.com` em vez da `.com.br`, crie lá.**
-Medido em 2026-09-11: a `.com.br` tem Cache Everything na **zona inteira** (o apex
-`stlflix.com.br` guarda URL nova: `MISS` e depois `HIT`), e a `.com` não
-(`research.stlflix.com` e `n8n-ops.stlflix.com` dão `DYNAMIC` nas duas chamadas).
-Um host em `.com` nasce sem o vazamento do
-[AD-028 da plataforma](https://github.com/stlflix/plataforma-product-ops/blob/main/docs/decisions/028-toda-resposta-autenticada-de-api-entra-no-edge.md);
-um em `.com.br` nasce com ele. É trocar `STUDIO_HOST` no `.env`.
-
-## Atualizar o MCP
+## Verificar sem subir nada
 
 ```bash
-rsync -a --delete --exclude node_modules ~/Projetos/stl-plugin/mcp-server/ mkt-vps:/home/ubuntu/supabase-ops/mcp-src/
-ssh mkt-vps 'cd /home/ubuntu/supabase-ops && docker build -t stl-buildloop-mcp:<tag> mcp-src && sed -i "s/^MCP_IMAGE_TAG=.*/MCP_IMAGE_TAG=<tag>/" supabase/docker/.env && cd supabase/docker && docker compose up -d mcp'
+docker compose -f docker-compose.yml config >/dev/null   # valida offline, sem daemon
 ```
