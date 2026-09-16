@@ -5,28 +5,15 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { adminRouter } from "./admin.js";
 import { bearerFrom, hashToken } from "./auth.js";
-import { loadKey } from "./crypto.js";
+import { loadConfig } from "./config.js";
 import { PoolRegistry } from "./db.js";
 import { hardenSharedDatabases } from "./provision.js";
+import { runtimeRouter } from "./runtime-api.js";
 import { CollaboratorStore } from "./store.js";
-import { defineTools } from "./tools.js";
+import { callTool, defineTools } from "./tools.js";
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
-
-const config = {
-  port: Number(process.env.PORT ?? 8200),
-  dbHost: process.env.DB_HOST ?? "db",
-  dbPort: Number(process.env.DB_PORT ?? 5432),
-  statementTimeoutMs: Number(process.env.STATEMENT_TIMEOUT_MS ?? 30_000),
-  // supabase_admin on the shared database: provisioning and the registry.
-  adminDbUrl: required("ADMIN_DB_URL"),
-  adminKey: required("ADMIN_KEY"),
-  credentialsKey: loadKey(required("CREDENTIALS_KEY")),
-};
+// By allowlist, and never with an env that belongs to the platform (I1).
+const config = loadConfig();
 
 const adminUrl = new URL(config.adminDbUrl);
 const adminConnection = {
@@ -39,12 +26,25 @@ const adminPool = new pg.Pool({ connectionString: config.adminDbUrl, max: 3 });
 adminPool.on("error", (err) => console.error(`[admin pool] ${err.message}`));
 
 const store = new CollaboratorStore(adminPool, config.credentialsKey);
-const pools = new PoolRegistry({ store, host: config.dbHost, port: config.dbPort, statementTimeoutMs: config.statementTimeoutMs });
-const tools = defineTools({ pools });
+const pools = new PoolRegistry({
+  store,
+  host: config.dbHost,
+  port: config.dbPort,
+  statementTimeoutMs: config.statementTimeoutMs,
+  // The same identity provisioning already uses inside a collaborator's
+  // database: it owns the `buildloop` schema, so it is what writes there (AD-009).
+  adminConnection,
+});
+const tools = defineTools({
+  pools,
+  adminPool,
+  credentialsKey: config.credentialsKey,
+  functionsUrl: config.functionsUrl,
+});
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 function buildServer(slug) {
-  const server = new Server({ name: "stl-supabase", version: "0.3.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "stl-buildloop", version: "0.4.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })),
@@ -53,13 +53,8 @@ function buildServer(slug) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) throw new Error(`unknown tool: ${request.params.name}`);
-    try {
-      const result = await tool.handler(slug, request.params.arguments ?? {});
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    } catch (err) {
-      // Surface the database's own message; it is the collaborator's own database.
-      return { content: [{ type: "text", text: `error: ${err.message}` }], isError: true };
-    }
+    // The wrapper lives in tools.js, so what a tool answers is testable there.
+    return callTool(tool, slug, request.params.arguments);
   });
 
   return server;
@@ -76,13 +71,22 @@ app.get("/healthz", async (_req, res) => {
   }
 });
 
-app.use("/admin", adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, store, pools }));
+// The runtime's own surface is mounted first: `/admin/runtime/*` belongs to the
+// runtime key alone, and never falls through to the admin key's router.
+app.use(
+  "/admin/runtime",
+  runtimeRouter({ runtimeKey: config.runtimeKey, credentialsKey: config.credentialsKey, store, pools }),
+);
+app.use(
+  "/admin",
+  adminRouter({ adminKey: config.adminKey, adminPool, adminConnection, credentialsKey: config.credentialsKey, store, pools }),
+);
 
 app.post("/mcp", async (req, res) => {
   const token = bearerFrom(req.get("authorization"));
   const slug = token ? await store.slugForTokenHash(hashToken(token)) : null;
   if (!slug) {
-    res.setHeader("WWW-Authenticate", 'Bearer realm="stl-supabase"');
+    res.setHeader("WWW-Authenticate", 'Bearer realm="stl-buildloop"');
     return res.status(401).json({ error: "unknown or missing bearer token" });
   }
 
@@ -111,7 +115,7 @@ await store.ensureSchema();
 await hardenSharedDatabases(adminPool);
 
 const listener = app.listen(config.port, "0.0.0.0", async () =>
-  console.log(`stl-supabase MCP listening on ${config.port} for ${await store.count()} collaborator(s)`),
+  console.log(`stl-buildloop MCP listening on ${config.port} for ${await store.count()} collaborator(s)`),
 );
 
 for (const signal of ["SIGTERM", "SIGINT"]) {

@@ -1,15 +1,17 @@
 {
-  "name": "stl-supabase-mcp",
-  "version": "0.3.0",
+  "name": "stl-buildloop-mcp",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "MCP server that gives a STLFLIX collaborator their own database on the ops self-hosted Supabase, and nothing else.",
+  "description": "BuildLoop MCP server: gives a STLFLIX collaborator their own Postgres database on the ops cluster, and nothing else.",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/*.integration.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",
+    "esbuild": "0.28.2",
     "express": "^5.1.0",
     "pg": "^8.16.3"
   },

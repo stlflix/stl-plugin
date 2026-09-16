@@ -1,7 +1,7 @@
-# stl-supabase MCP server
+# stl-buildloop MCP server
 
-Gives a STLFLIX collaborator their own database on the ops self-hosted Supabase,
-over MCP, and nothing else.
+Gives a STLFLIX collaborator their own database on the ops BuildLoop Postgres
+cluster, over MCP, and nothing else.
 
 - **Transport**: streamable HTTP, stateless — one server and one transport per
   request, so no session leaks between collaborators.
@@ -24,7 +24,7 @@ over MCP, and nothing else.
 | `PUT /admin/collaborators/:slug` `{email}` | provision (role + `db_<slug>` + no CONNECT anywhere else). Idempotent: rotates the role password, keeps the database |
 | `POST /admin/collaborators/:slug/token` | issue the bearer token — shown once, replaces the previous one |
 
-The platform (`plataforma-product-ops`, module `supabase`) is the normal caller.
+The platform (`plataforma-product-ops`, module `buildloop`) is the normal caller.
 From the ops host:
 
 ```bash
@@ -40,16 +40,21 @@ on `postgres`, `template1` and `_supabase` (service roles keep theirs, explicitl
 
 ```bash
 npm test                       # unit tests, no database needed
-docker build -t stl-supabase-mcp .
+docker build -t stl-buildloop-mcp .
 ```
 
 | env | default | meaning |
 |---|---|---|
 | `PORT` | `8200` | listen port |
-| `DB_HOST` / `DB_PORT` | `db` / `5432` | Postgres inside the Supabase network |
-| `ADMIN_DB_URL` | — | `postgres://supabase_admin:…@db:5432/postgres` (required) |
+| `DB_HOST` / `DB_PORT` | `db` / `5432` | Postgres inside the BuildLoop network |
+| `ADMIN_DB_URL` | — | `postgres://<admin>:…@db:5432/postgres` (required) |
 | `ADMIN_KEY` | — | shared secret for `/admin/*` (required) |
 | `CREDENTIALS_KEY` | — | 64 hex chars; encrypts role passwords at rest (required) |
+| `RUNTIME_KEY` | — | shared secret for `/admin/runtime/*`, the functions runtime's own key (required) |
+| `FUNCTIONS_URL` | `http://functions:8300` | where published functions answer |
 | `STATEMENT_TIMEOUT_MS` | `30000` | per-statement timeout |
 
-The ops stack that runs this lives in `../ops/supabase/`.
+Anything else is ignored, and an env matching `N8N`, `PLATFORM`, `PRODUCTOPS`
+or `JWT_SECRET` stops the server: this cluster never reaches the platform (I1).
+
+The ops stack that runs this lives in `../ops/buildloop/`.

@@ -24,6 +24,25 @@ export class CollaboratorStore {
       created_at      timestamptz NOT NULL DEFAULT now(),
       updated_at      timestamptz NOT NULL DEFAULT now()
     )`);
+    // The `_fn` role's password: added after the first release, so the column
+    // arrives by ALTER instead of a migration of its own.
+    await this.pool.query(
+      "ALTER TABLE stl_mcp.collaborators ADD COLUMN IF NOT EXISTS fn_password_enc text",
+    );
+    // What has to be resolved BEFORE the slug is known lives here, not in the
+    // collaborator's own database: origin → slug, and the tickets already spent.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS stl_mcp.allowed_origins (
+      origin     text PRIMARY KEY,
+      slug       text NOT NULL REFERENCES stl_mcp.collaborators (slug) ON DELETE CASCADE,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await this.pool.query(
+      "CREATE INDEX IF NOT EXISTS allowed_origins_slug_idx ON stl_mcp.allowed_origins (slug)",
+    );
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS stl_mcp.used_tickets (
+      jti        text PRIMARY KEY,
+      expires_at timestamptz NOT NULL
+    )`);
     await this.pool.query("REVOKE ALL ON SCHEMA stl_mcp FROM PUBLIC");
   }
 
@@ -61,16 +80,37 @@ export class CollaboratorStore {
     return rows[0]?.slug ?? null;
   }
 
-  async upsert({ slug, email, dbName, password }) {
+  async upsert({ slug, email, dbName, password, fnPassword }) {
     await this.pool.query(
-      `INSERT INTO stl_mcp.collaborators (slug, email, db_name, role_name, password_enc)
-       VALUES ($1, $2, $3, $1, $4)
+      `INSERT INTO stl_mcp.collaborators (slug, email, db_name, role_name, password_enc, fn_password_enc)
+       VALUES ($1, $2, $3, $1, $4, $5)
        ON CONFLICT (slug) DO UPDATE
          SET email = COALESCE(EXCLUDED.email, stl_mcp.collaborators.email),
              password_enc = EXCLUDED.password_enc,
+             fn_password_enc = COALESCE(EXCLUDED.fn_password_enc, stl_mcp.collaborators.fn_password_enc),
              updated_at = now()`,
-      [slug, email ?? null, dbName, encrypt(password, this.key)],
+      [slug, email ?? null, dbName, encrypt(password, this.key), fnPassword ? encrypt(fnPassword, this.key) : null],
     );
+  }
+
+  /** After an upgrade the `_fn` role has a new password and no other row changes. */
+  async setFnPassword(slug, fnPassword) {
+    const { rowCount } = await this.pool.query(
+      "UPDATE stl_mcp.collaborators SET fn_password_enc = $2, updated_at = now() WHERE slug = $1",
+      [slug, encrypt(fnPassword, this.key)],
+    );
+    if (rowCount === 0) throw new Error(`collaborator '${slug}' is not provisioned`);
+  }
+
+  /** Credentials for opening a pool AS `<slug>_fn`, for the functions runtime. */
+  async fnConnectionFor(slug) {
+    const { rows } = await this.pool.query(
+      "SELECT db_name, fn_password_enc FROM stl_mcp.collaborators WHERE slug = $1",
+      [slug],
+    );
+    const row = rows[0];
+    if (!row?.fn_password_enc) return null;
+    return { database: row.db_name, user: `${slug}_fn`, password: decrypt(row.fn_password_enc, this.key) };
   }
 
   async setTokenHash(slug, hash) {

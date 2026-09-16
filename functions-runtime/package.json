@@ -1,0 +1,19 @@
+{
+  "name": "stl-buildloop-functions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BuildLoop functions runtime: runs a collaborator's edge functions in a child process that holds no credential at all.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/*.integration.test.js"
+  },
+  "dependencies": {
+    "jose": "6.2.4",
+    "pg": "8.23.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
