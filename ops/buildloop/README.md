@@ -102,9 +102,10 @@ Checklist do T49 da feature `buildloop-studio`, como saiu na hora:
   `stl-buildloop-functions:0.1.0` (245 MB), a partir da `main` do `stl-plugin`.
 - `gen-env.py` gerou o `.env`; `MCP_ADMIN_KEY` foi trocada pela chave que a
   plataforma já usava; `BUILDLOOP_HOST=db.stlflix.com.br` (só `/mcp`) e
-  `BUILDLOOP_FN_HOST=db.stlflix.com` — **o registro DNS na zona `.com` ainda não
-  existe**, então `/fn/` e `/auth/jwks` seguem inalcançáveis de fora até o Lucas
-  criá-lo. `AUTH_PRIVATE_KEY` copiada para o `productops-web` como
+  `BUILDLOOP_FN_HOST=db.stlflix.com` — registro A criado pelo Lucas na zona `.com`
+  (proxied) em 2026-09-16, ~19:50 UTC; testado pela Cloudflare: `/auth/jwks` 200
+  `cf-cache-status: DYNAMIC` em três hits, `/fn/<slug>/<fn>` 404/400 com
+  `private, no-store`, `/mcp` e `/healthz` 404 nesse host, HTTP→HTTPS 301. `AUTH_PRIVATE_KEY` copiada para o `productops-web` como
   `BUILDLOOP_AUTH_PRIVATE_KEY` (a que estava lá não era uma chave ES256).
 - `docker compose down` da stack `supabase` (7 containers) e `docker image rm`
   de `supabase/*`, `postgrest/*`, `envoyproxy/envoy` e `stl-supabase-mcp`.
