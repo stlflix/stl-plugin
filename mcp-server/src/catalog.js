@@ -142,3 +142,184 @@ export function rowsToRlsState(rows, policyRows = []) {
     policies: byTable.get(`${row.schema}.${row.name}`) ?? [],
   }));
 }
+
+/**
+ * The fixed catalogue of security lints (BL-27). Fixed on purpose: eight rules
+ * the collaborator can learn, not a moving score. Every `sql` reads the catalog
+ * with the collaborator's own role, so a finding is always about something they
+ * can see; `format('%I.%I', …)` lets Postgres quote the identifier, so the fix
+ * SQL is safe for a table called `My Table` without a quoter of our own.
+ */
+const LINT_RELKINDS = "c.relkind::text = ANY (ARRAY['r', 'p'])";
+const FUNCTION_SIGNATURE = "format('%I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))";
+
+export const LINTS = [
+  {
+    id: "rls_disabled",
+    severity: "warn",
+    explain:
+      "A tabela não tem row level security: qualquer role com privilégio de SELECT lê todas as linhas.",
+    sql: `
+      SELECT format('%I.%I', n.nspname, c.relname) AS object,
+             format('%I.%I', n.nspname, c.relname) AS relation
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE ${LINT_RELKINDS} AND NOT c.relrowsecurity AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+      ORDER BY 1`,
+    fix: (row) => `ALTER TABLE ${row.relation} ENABLE ROW LEVEL SECURITY`,
+  },
+  {
+    id: "policy_always_true",
+    severity: "warn",
+    explain:
+      "A policy usa USING (true) para uma role de execução: ela não filtra nada, só faz a tabela parecer protegida.",
+    sql: `
+      SELECT format('%I.%I', schemaname, tablename) || ' · ' || policyname AS object,
+             format('%I.%I', schemaname, tablename) AS relation,
+             policyname AS policy
+      FROM pg_policies
+      WHERE btrim(coalesce(qual, '')) = 'true'
+        AND schemaname NOT IN ${HIDDEN_SCHEMAS}
+        AND EXISTS (
+          SELECT 1 FROM unnest(roles::text[]) AS r
+          WHERE r = 'public' OR r LIKE '%\\_anon' OR r LIKE '%\\_authenticated')
+      ORDER BY 1`,
+    // No mechanical fix: only the author knows which rows should be visible.
+    fix: () => null,
+  },
+  {
+    id: "definer_without_search_path",
+    severity: "error",
+    explain:
+      "A função é SECURITY DEFINER e não fixa search_path: quem a chama pode apontá-la para objetos próprios e executar código como o dono.",
+    sql: `
+      SELECT ${FUNCTION_SIGNATURE} AS object,
+             ${FUNCTION_SIGNATURE} AS signature
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.prosecdef
+        AND p.prokind::text = 'f'
+        AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) AS cfg
+          WHERE cfg LIKE 'search_path=%')
+      ORDER BY 1`,
+    fix: (row) => `ALTER FUNCTION ${row.signature} SET search_path = ''`,
+  },
+  {
+    id: "definer_executable_by_public",
+    severity: "error",
+    explain:
+      "A função roda como o dono e PUBLIC pode executá-la: qualquer role do banco usa os privilégios do dono através dela.",
+    sql: `
+      SELECT ${FUNCTION_SIGNATURE} AS object,
+             ${FUNCTION_SIGNATURE} AS signature
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.prosecdef
+        AND p.prokind::text = 'f'
+        AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+        AND has_function_privilege('public', p.oid, 'EXECUTE')
+      ORDER BY 1`,
+    fix: (row) => `REVOKE EXECUTE ON FUNCTION ${row.signature} FROM PUBLIC`,
+  },
+  {
+    id: "extension_in_public",
+    severity: "info",
+    explain:
+      "A extensão está instalada em public: os objetos dela ficam misturados com os seus e no search_path de todo mundo.",
+    sql: `
+      SELECT e.extname AS object, quote_ident(e.extname) AS extension
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+      WHERE n.nspname = 'public'
+      ORDER BY 1`,
+    fix: (row) => `ALTER EXTENSION ${row.extension} SET SCHEMA extensions`,
+  },
+  {
+    id: "rls_without_policies",
+    severity: "info",
+    explain:
+      "A tabela tem RLS ligado e nenhuma policy: nenhuma linha é visível para as roles de execução.",
+    sql: `
+      SELECT format('%I.%I', n.nspname, c.relname) AS object,
+             format('%I.%I', n.nspname, c.relname) AS relation
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE ${LINT_RELKINDS} AND c.relrowsecurity
+        AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+        AND NOT EXISTS (SELECT 1 FROM pg_policy pol WHERE pol.polrelid = c.oid)
+      ORDER BY 1`,
+    // No mechanical fix: an empty policy set is a decision, not a typo.
+    fix: () => null,
+  },
+  {
+    id: "fk_without_index",
+    severity: "info",
+    explain:
+      "A chave estrangeira não tem índice que comece pelas colunas dela: cada DELETE ou UPDATE no lado referenciado varre a tabela inteira.",
+    sql: `
+      SELECT format('%I.%I', n.nspname, c.relname) || ' (' || fk.columns || ')' AS object,
+             format('%I.%I', n.nspname, c.relname) AS relation,
+             fk.columns AS columns
+      FROM pg_constraint con
+      JOIN pg_class c ON c.oid = con.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      CROSS JOIN LATERAL (
+        SELECT string_agg(format('%I', a.attname), ', ' ORDER BY k.ord) AS columns
+        FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS fk
+      WHERE con.contype::text = 'f'
+        AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_index i
+          WHERE i.indrelid = con.conrelid AND i.indkey[0] = con.conkey[1])
+      ORDER BY 1`,
+    fix: (row) => `CREATE INDEX ON ${row.relation} (${row.columns})`,
+  },
+  {
+    id: "table_without_pk",
+    severity: "info",
+    explain:
+      "A tabela não tem chave primária: a grade do Studio fica somente leitura e não há como endereçar uma linha com segurança.",
+    sql: `
+      SELECT format('%I.%I', n.nspname, c.relname) AS object,
+             format('%I.%I', n.nspname, c.relname) AS relation
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE ${LINT_RELKINDS}
+        AND n.nspname NOT IN ${HIDDEN_SCHEMAS}
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint con WHERE con.conrelid = c.oid AND con.contype::text = 'p')
+      ORDER BY 1`,
+    // No mechanical fix: which column is the key is the author's call.
+    fix: () => null,
+  },
+];
+
+/** Worst first, so the badge on the tab and the first line of the list agree. */
+export const LINT_SEVERITY_ORDER = ["error", "warn", "info"];
+
+/**
+ * Runs the eight lints on one connection (the collaborator's own role) and
+ * returns the findings ordered by severity. A lint with no rows simply
+ * contributes nothing — an empty result is the good outcome.
+ */
+export async function runLints(client) {
+  const findings = [];
+  for (const lint of LINTS) {
+    const { rows } = await client.query(lint.sql);
+    for (const row of rows) {
+      findings.push({
+        id: lint.id,
+        severity: lint.severity,
+        object: row.object,
+        explain: lint.explain,
+        fixSql: lint.fix(row),
+      });
+    }
+  }
+  return findings.sort(
+    (a, b) => LINT_SEVERITY_ORDER.indexOf(a.severity) - LINT_SEVERITY_ORDER.indexOf(b.severity),
+  );
+}
