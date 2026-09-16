@@ -27,6 +27,12 @@ O `Cache-Control: private, no-store` que o runtime envia é correto e **não
 fecha isso**: a chave de cache da zona não varia com o header. O que fecha é a
 zona.
 
+**Dois hosts enquanto o DNS não existe.** `BUILDLOOP_HOST` serve só `/mcp` (POST,
+não cacheia) e pode ficar em `db.stlflix.com.br`, como hoje. `BUILDLOOP_FN_HOST`
+(opcional, padrão = `BUILDLOOP_HOST`) é o host de `/fn/` e `/auth/`: aponte-o para
+`db.stlflix.com` e crie o registro na zona `.com` quando for a hora — até lá as
+Edge Functions ficam inalcançáveis de fora, que é o comportamento seguro.
+
 Enquanto o registro não existir, o acesso é por túnel SSH (`8200` MCP, `8300`
 runtime, `5433` Postgres):
 
