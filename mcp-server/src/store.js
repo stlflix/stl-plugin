@@ -29,6 +29,20 @@ export class CollaboratorStore {
     await this.pool.query(
       "ALTER TABLE stl_mcp.collaborators ADD COLUMN IF NOT EXISTS fn_password_enc text",
     );
+    // What has to be resolved BEFORE the slug is known lives here, not in the
+    // collaborator's own database: origin → slug, and the tickets already spent.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS stl_mcp.allowed_origins (
+      origin     text PRIMARY KEY,
+      slug       text NOT NULL REFERENCES stl_mcp.collaborators (slug) ON DELETE CASCADE,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await this.pool.query(
+      "CREATE INDEX IF NOT EXISTS allowed_origins_slug_idx ON stl_mcp.allowed_origins (slug)",
+    );
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS stl_mcp.used_tickets (
+      jti        text PRIMARY KEY,
+      expires_at timestamptz NOT NULL
+    )`);
     await this.pool.query("REVOKE ALL ON SCHEMA stl_mcp FROM PUBLIC");
   }
 
