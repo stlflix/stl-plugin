@@ -22,7 +22,9 @@ services:
     volumes:
       - buildloop_db:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5433:5432"
+      # 5433 in normal service; the migration script brings this cluster up on
+      # 5434 while the old one still holds 5433, and swaps them at the cutover.
+      - "127.0.0.1:${DB_PORT_HOST:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U buildloop_admin -d postgres"]
       interval: 10s
