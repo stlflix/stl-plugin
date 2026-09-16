@@ -45,14 +45,24 @@ echo "new cluster answering on ${NEW_PORT}"
 
 step "restoring the roles"
 # Only ours: the old cluster's own service roles do not exist in the new one and
-# must not be invented there.
+# must not be invented there. The grep is a substring match on purpose, so it
+# also catches <slug>_anon/<slug>_authenticated/<slug>_fn if the old cluster
+# ever had them (it will not — `upgrade` below creates them) without needing
+# their own entries in the filter file.
 {
   echo "stl_collaborator"
   printf '%s\n' "${SLUGS[@]}"
 } > /tmp/buildloop-roles.txt
-pg_dumpall --roles-only --no-role-passwords -d "$OLD_URL" \
+# The role passwords travel with the dump (no flag strips them): pg_dumpall
+# emits each role's SCRAM verifier (`ALTER ROLE … PASSWORD 'SCRAM-SHA-256$…'`),
+# which restores as-is. Without that, `PoolRegistry.forSlug`
+# (mcp-server/src/db.js) would authenticate with the password decrypted from
+# stl_mcp.collaborators.password_enc against a role that no longer has one,
+# and every collaborator would be locked out.
+pg_dumpall --roles-only -d "$OLD_URL" \
   | grep -E "$(paste -sd'|' /tmp/buildloop-roles.txt)" \
   | psql "$NEW_URL" -v ON_ERROR_STOP=0 || true
+echo "roles restored with their passwords (SCRAM verifiers), not just their names"
 
 step "restoring each collaborator database"
 for slug in "${SLUGS[@]}"; do
