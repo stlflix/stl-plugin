@@ -2,7 +2,7 @@
  * Tools exposed to a collaborator, all scoped to their own database by the
  * Postgres role the pool authenticates with.
  */
-import { DESCRIBE_SQL, LIST_TABLES_SQL, POLICIES_SQL } from "./catalog.js";
+import { DESCRIBE_SQL, LIST_TABLES_SQL, TABLE_POLICIES_SQL } from "./catalog.js";
 
 const MIGRATIONS_SCHEMA = "supabase_migrations";
 const MIGRATIONS_TABLE = "schema_migrations";
@@ -33,7 +33,7 @@ export function defineTools({ pools }) {
       handler: async (slug, { table }) => {
         const columns = (await query(slug, DESCRIBE_SQL, [table])).rows;
         if (columns.length === 0) throw new Error(`no table named '${table}' in your database`);
-        const policies = (await query(slug, POLICIES_SQL, [table])).rows;
+        const policies = (await query(slug, TABLE_POLICIES_SQL, [table])).rows;
         return { table, columns, policies };
       },
     },
