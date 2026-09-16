@@ -15,6 +15,23 @@ import { ChildDied, Supervisor, Timeout, UnknownFunction } from "./supervisor.js
 
 const JWKS_CACHE = { "cache-control": "public, max-age=300" };
 
+/**
+ * A collaborator's page calls its functions from another origin, so every
+ * `/fn` answer — and the preflight before it — carries CORS. `*` is safe here
+ * because identity travels in the `Authorization` header, never in a cookie:
+ * the browser does not attach credentials, and a token it does not hold buys
+ * nothing. Which origins may LOG IN is the platform's decision (its exchange
+ * route checks the registry); which pages may CALL a published function is
+ * the function's own business.
+ */
+export const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-expose-headers": "retry-after",
+  "access-control-max-age": "600",
+};
+
 function send(res, status, body, headers = {}) {
   const payload = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body), "utf8");
   const type = Buffer.isBuffer(body) ? {} : { "content-type": "application/json" };
@@ -55,15 +72,17 @@ function reload(req, res, parts, supervisor, runtimeKey) {
 async function invoke(req, res, parts, { admit, supervisor, bridge }) {
   const started = Date.now();
   const [, slug, name] = parts;
+  // The preflight carries no bearer and must not be judged as a call.
+  if (req.method === "OPTIONS") return send(res, 204, Buffer.alloc(0), { ...CORS, ...NO_STORE });
   const verdict = await admit({ slug, name, headers: req.headers });
-  if (!verdict.ok) return send(res, verdict.status, { error: verdict.error }, verdict.headers);
+  if (!verdict.ok) return send(res, verdict.status, { error: verdict.error }, { ...CORS, ...verdict.headers });
 
   let body;
   try {
     body = await readLimitedBody(req);
   } catch (err) {
     if (!(err instanceof BodyTooLarge)) throw err;
-    return send(res, 413, { error: err.message }, verdict.headers);
+    return send(res, 413, { error: err.message }, { ...CORS, ...verdict.headers });
   }
 
   const request = {
@@ -76,7 +95,7 @@ async function invoke(req, res, parts, { admit, supervisor, bridge }) {
   try {
     const answer = await supervisor.invoke(slug, name, request, verdict.user);
     await log(bridge, slug, { name, status: answer.status, durationMs: Date.now() - started, log: answer.log, error: answer.error });
-    return send(res, answer.status, Buffer.from(answer.body ?? "", "base64"), { ...answer.headers, ...verdict.headers });
+    return send(res, answer.status, Buffer.from(answer.body ?? "", "base64"), { ...CORS, ...answer.headers, ...verdict.headers });
   } catch (err) {
     // The three ways an invocation ends without an answer, each its own status:
     // nothing published (404), too slow (504), the process is gone (503).
@@ -84,7 +103,7 @@ async function invoke(req, res, parts, { admit, supervisor, bridge }) {
     if (status !== 404) {
       await log(bridge, slug, { name, status, durationMs: Date.now() - started, log: [], error: err.message });
     }
-    return send(res, status, { error: err.message }, verdict.headers);
+    return send(res, status, { error: err.message }, { ...CORS, ...verdict.headers });
   }
 }
 

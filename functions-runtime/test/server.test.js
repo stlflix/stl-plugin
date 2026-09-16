@@ -151,6 +151,31 @@ test("_reload is the MCP's door and needs the runtime key", async () => {
   assert.deepEqual(reloads, [["alice", "hello"]]);
 });
 
+test("a page on another origin gets CORS: the preflight is 204 without a bearer, and every /fn answer allows *", async () => {
+  invocations.length = 0;
+  answer = ok(201);
+  const pre = await call("/fn/alice/hello", {
+    method: "OPTIONS",
+    headers: { origin: "https://app.example.com", "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" },
+  });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get("access-control-allow-origin"), "*");
+  assert.equal(pre.headers.get("access-control-allow-headers"), "authorization, content-type");
+  assert.match(pre.headers.get("access-control-allow-methods"), /POST/);
+  assert.deepEqual(invocations, [], "a preflight is not an invocation");
+
+  const answered = await call("/fn/alice/hello", { method: "POST", headers: { origin: "https://app.example.com" }, body: "{}" });
+  assert.equal(answered.status, 201);
+  assert.equal(answered.headers.get("access-control-allow-origin"), "*");
+
+  const refused = await call("/fn/alice/hello", { headers: { authorization: "Bearer nope" } });
+  assert.equal(refused.status, 401);
+  assert.equal(refused.headers.get("access-control-allow-origin"), "*", "a refusal the page can read beats a network error it cannot");
+
+  const jwks = await call("/auth/jwks");
+  assert.equal(jwks.headers.get("access-control-allow-origin"), null, "only /fn is a cross-origin surface");
+});
+
 test("anything else is 404", async () => {
   assert.equal((await call("/")).status, 404);
   assert.equal((await call("/admin/collaborators/alice")).status, 404);
