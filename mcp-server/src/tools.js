@@ -2,7 +2,20 @@
  * Tools exposed to a collaborator, all scoped to their own database by the
  * Postgres role the pool authenticates with.
  */
-import { DESCRIBE_SQL, LIST_TABLES_SQL, TABLE_POLICIES_SQL } from "./catalog.js";
+import {
+  DESCRIBE_SQL,
+  FUNCTIONS_SQL,
+  FUNCTION_DEF_SQL,
+  LIST_TABLES_SQL,
+  POLICIES_SQL,
+  RLS_STATE_SQL,
+  TABLE_POLICIES_SQL,
+  rowsToFunctions,
+  rowsToRlsState,
+  runLints,
+} from "./catalog.js";
+import { runExec } from "./mutations.js";
+import { createPolicySql, dropPolicySql, setRlsSql } from "./policy-sql.js";
 
 const MIGRATIONS_SCHEMA = "supabase_migrations";
 const MIGRATIONS_TABLE = "schema_migrations";
@@ -11,6 +24,22 @@ export function defineTools({ pools }) {
   const query = async (slug, sql, params = []) => {
     const result = await (await pools.forSlug(slug)).query(sql, params);
     return result;
+  };
+
+  /**
+   * A statement written by `policy-sql.js` — the same one the Studio's `exec`
+   * route sends — applied in one transaction. `policy-sql` throws before this
+   * runs, so a refused name never reaches the pool (BL-26).
+   */
+  const exec = async (slug, sql) => ({ sql, results: await runExec(await pools.forSlug(slug), [{ sql }]) });
+
+  const relation = {
+    type: "object",
+    properties: {
+      schema: { type: "string", description: "Schema name; defaults to public" },
+      table: { type: "string", description: "Table name" },
+    },
+    required: ["table"],
   };
 
   return [
@@ -105,6 +134,92 @@ export function defineTools({ pools }) {
         });
         return result.rows;
       },
+    },
+    {
+      name: "list_functions",
+      title: "List functions",
+      description: "Every function of your own schemas, with its arguments, return type, language, SECURITY DEFINER/INVOKER and volatility.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async (slug) => rowsToFunctions((await query(slug, FUNCTIONS_SQL)).rows),
+    },
+    {
+      name: "get_function",
+      title: "Get a function",
+      description: "The full definition of one function, as Postgres re-prints it (pg_get_functiondef).",
+      inputSchema: {
+        type: "object",
+        properties: { oid: { type: "integer", description: "Function oid, from list_functions" } },
+        required: ["oid"],
+      },
+      handler: async (slug, { oid }) => {
+        if (!Number.isInteger(oid) || oid <= 0) throw new Error("oid must be a positive integer");
+        const { rows } = await query(slug, FUNCTION_DEF_SQL, [oid]);
+        const definition = rows[0]?.definition ?? null;
+        if (!definition) throw new Error(`no function with oid ${oid} in your database`);
+        return { oid, definition };
+      },
+    },
+    {
+      name: "list_policies",
+      title: "List RLS state and policies",
+      description: "Every table with its row level security state (off, on, forced) and the policies attached to it.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async (slug) => {
+        const state = await query(slug, RLS_STATE_SQL);
+        const policies = await query(slug, POLICIES_SQL);
+        return rowsToRlsState(state.rows, policies.rows);
+      },
+    },
+    {
+      name: "set_rls",
+      title: "Turn row level security on or off",
+      description: "Enable, disable, force or unforce row level security on one of your tables.",
+      inputSchema: {
+        ...relation,
+        properties: {
+          ...relation.properties,
+          mode: { type: "string", enum: ["enable", "disable", "force", "noforce"], description: "What to do" },
+        },
+        required: ["table", "mode"],
+      },
+      handler: async (slug, args) => exec(slug, setRlsSql(args)),
+    },
+    {
+      name: "create_policy",
+      title: "Create a policy",
+      description: "Create a row level security policy. USING and WITH CHECK are your own SQL expressions; Postgres judges them.",
+      inputSchema: {
+        ...relation,
+        properties: {
+          ...relation.properties,
+          name: { type: "string", description: "Policy name" },
+          command: { type: "string", enum: ["ALL", "SELECT", "INSERT", "UPDATE", "DELETE"], description: "Command the policy covers" },
+          roles: { type: "array", items: { type: "string" }, description: "Roles the policy applies to, e.g. <slug>_authenticated" },
+          using: { type: "string", description: "USING expression" },
+          withCheck: { type: "string", description: "WITH CHECK expression" },
+          permissive: { type: "boolean", description: "PERMISSIVE (default) or RESTRICTIVE" },
+        },
+        required: ["table", "name", "roles"],
+      },
+      handler: async (slug, args) => exec(slug, createPolicySql(args)),
+    },
+    {
+      name: "drop_policy",
+      title: "Drop a policy",
+      description: "Remove one policy from one of your tables.",
+      inputSchema: {
+        ...relation,
+        properties: { ...relation.properties, name: { type: "string", description: "Policy name" } },
+        required: ["table", "name"],
+      },
+      handler: async (slug, args) => exec(slug, dropPolicySql(args)),
+    },
+    {
+      name: "security_lint",
+      title: "Security lint",
+      description: "Run the fixed catalogue of eight security checks on your database, worst first, each with the SQL that fixes it when there is one.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async (slug) => runLints(await pools.forSlug(slug)),
     },
   ];
 }
