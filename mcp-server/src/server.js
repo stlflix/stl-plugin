@@ -10,7 +10,7 @@ import { PoolRegistry } from "./db.js";
 import { hardenSharedDatabases } from "./provision.js";
 import { runtimeRouter } from "./runtime-api.js";
 import { CollaboratorStore } from "./store.js";
-import { defineTools } from "./tools.js";
+import { callTool, defineTools } from "./tools.js";
 
 // By allowlist, and never with an env that belongs to the platform (I1).
 const config = loadConfig();
@@ -27,7 +27,12 @@ adminPool.on("error", (err) => console.error(`[admin pool] ${err.message}`));
 
 const store = new CollaboratorStore(adminPool, config.credentialsKey);
 const pools = new PoolRegistry({ store, host: config.dbHost, port: config.dbPort, statementTimeoutMs: config.statementTimeoutMs });
-const tools = defineTools({ pools });
+const tools = defineTools({
+  pools,
+  adminPool,
+  credentialsKey: config.credentialsKey,
+  functionsUrl: config.functionsUrl,
+});
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 function buildServer(slug) {
@@ -40,13 +45,8 @@ function buildServer(slug) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) throw new Error(`unknown tool: ${request.params.name}`);
-    try {
-      const result = await tool.handler(slug, request.params.arguments ?? {});
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    } catch (err) {
-      // Surface the database's own message; it is the collaborator's own database.
-      return { content: [{ type: "text", text: `error: ${err.message}` }], isError: true };
-    }
+    // The wrapper lives in tools.js, so what a tool answers is testable there.
+    return callTool(tool, slug, request.params.arguments);
   });
 
   return server;
