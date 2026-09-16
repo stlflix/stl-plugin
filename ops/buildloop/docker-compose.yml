@@ -99,7 +99,10 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: "root_default"
-      traefik.http.routers.blfn.rule: 'Host(`${BUILDLOOP_HOST}`) && (PathPrefix(`/fn/`) || PathPrefix(`/auth/`))'
+      # Public GET surface: it MUST live on a zone that does not cache (README).
+      # Defaults to BUILDLOOP_HOST; set BUILDLOOP_FN_HOST to keep /mcp on the old
+      # host while /fn waits for its DNS record.
+      traefik.http.routers.blfn.rule: 'Host(`${BUILDLOOP_FN_HOST:-${BUILDLOOP_HOST}}`) && (PathPrefix(`/fn/`) || PathPrefix(`/auth/`))'
       traefik.http.routers.blfn.entrypoints: "websecure"
       traefik.http.routers.blfn.tls: "true"
       traefik.http.routers.blfn.priority: "120"
