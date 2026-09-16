@@ -36,7 +36,7 @@ const tools = defineTools({
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 function buildServer(slug) {
-  const server = new Server({ name: "stl-buildloop", version: "0.4.0-dev" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "stl-buildloop", version: "0.4.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })),

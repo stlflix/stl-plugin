@@ -1,6 +1,6 @@
 {
   "name": "stl-buildloop-mcp",
-  "version": "0.4.0-dev",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "BuildLoop MCP server: gives a STLFLIX collaborator their own Postgres database on the ops cluster, and nothing else.",
