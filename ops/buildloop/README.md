@@ -74,6 +74,19 @@ O runtime é igual, com `fn-src`, `stl-buildloop-functions` e
 `FUNCTIONS_IMAGE_TAG`. Se a variável não estiver no `.env`, o compose usa o
 padrão que está escrito nele (`0.4.0` / `0.1.0`).
 
+## Backfill do grant de chave de secret (AD-010)
+
+Banco provisionado antes do AD-010 nao tem o `GRANT SELECT (name, key)` em
+`buildloop.edge_function_secrets`, e sem ele `edge.list` responde 502 para o
+colaborador. Depois de subir a imagem nova do MCP, uma vez:
+
+```bash
+ssh mkt-vps 'docker exec buildloop-mcp node scripts/grant-secret-keys.mjs'
+```
+
+Ele le os slugs do registro, aplica o revoke + grant em cada `db_<slug>`,
+imprime uma linha por slug e sai 1 se algum falhar. E idempotente.
+
 ## Colaborador novo
 
 Pela plataforma (módulo **BuildLoop**) — é ela que chama a API admin do MCP. Na
