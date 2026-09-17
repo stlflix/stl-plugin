@@ -1,7 +1,7 @@
 {
   "name": "stl-plugin",
   "displayName": "STLFLIX Dev Process",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "STLFLIX development process for collaborators: global CLAUDE.md, MCP connections (GitHub, Vercel, Firecrawl), process skills (spec-driven, atomic commits, green gate, handoff, security) and the product-ops design system.",
   "author": {
     "name": "Lucas Melo",
@@ -14,7 +14,7 @@
     "process",
     "spec-driven",
     "design-system",
-    "supabase",
+    "buildloop",
     "vercel"
   ],
   "userConfig": {
@@ -25,10 +25,10 @@
       "sensitive": true,
       "required": true
     },
-    "supabase_ops_token": {
+    "buildloop_ops_token": {
       "type": "string",
-      "title": "Supabase ops MCP token",
-      "description": "Bearer token issued by Lucas (issue-token.sh). Scopes the supabase MCP to your own database on the ops self-hosted Supabase. Stored in the Keychain.",
+      "title": "BuildLoop ops MCP token",
+      "description": "Bearer token issued by the BuildLoop panel on the platform. Scopes the buildloop MCP to your own database on the ops Postgres cluster. Stored in the Keychain.",
       "sensitive": true,
       "required": false
     }

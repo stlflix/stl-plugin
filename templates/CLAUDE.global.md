@@ -22,8 +22,8 @@ do processo está em `~/.claude/stl/config.json`.
 - **Self-healing obrigatório:** alterou arquivo → rode a skill `green-gate`
   (typecheck, lint, testes) e conserte o próprio erro antes de avisar que terminou.
 - **Busca na internet: só `firecrawl`.** WebSearch/WebFetch não são o padrão.
-- GitHub e Vercel entram pelos MCPs do plugin (OAuth via `/mcp`); Supabase
-  self-hosted entra pela CLI `supabase`, nunca por chave colada em prompt.
+- GitHub e Vercel entram pelos MCPs do plugin (OAuth via `/mcp`); o seu banco
+  entra pelo MCP `buildloop`, com o token do painel, nunca por chave colada em prompt.
 
 ## 3. Comunicação (zero enrolação)
 - **Idioma híbrido:** conversa em Português do Brasil; código, variáveis, logs,
