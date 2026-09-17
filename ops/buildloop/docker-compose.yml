@@ -81,7 +81,9 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /var/fn:mode=1700,size=64m
+      # A tmpfs do Docker nasce dona de root; sem uid=/gid= o processo `node`
+      # (USER node, uid 1000) nao consegue nem criar o diretorio do slug.
+      - /var/fn:mode=1700,uid=1000,gid=1000,size=64m
       - /tmp:mode=1777,size=16m
     environment:
       PORT: "8300"
