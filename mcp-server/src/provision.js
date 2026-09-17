@@ -29,6 +29,19 @@ function ensureRole(name, attrs) {
 }
 
 /**
+ * The two statements AD-010 requires, in the order that makes them safe: the
+ * revoke first, or the grant it runs after would wipe out the column grant.
+ * Shared by `commonPlan` and `grant-secret-keys.mjs`, the one-off script for
+ * databases provisioned before this decision (docs/decisions/010-…md).
+ */
+export function secretKeyGrantPlan({ db, slug, everyone }) {
+  return [
+    { db, sql: `REVOKE ALL ON buildloop.edge_function_secrets FROM ${everyone}` },
+    { db, sql: `GRANT SELECT (name, key) ON buildloop.edge_function_secrets TO ${slug}` },
+  ];
+}
+
+/**
  * Everything a database needs on top of "a role and a database": the execution
  * roles, the `auth` schema the platform's identity lands in, and the `buildloop`
  * schema that holds the collaborator's Edge Functions. Idempotent, so it is also
@@ -118,7 +131,9 @@ export function commonPlan({ slug, fnPassword }) {
   // holds. Trimming reads the ids it keeps, so SELECT comes with DELETE.
   plan.push({ db, sql: `GRANT SELECT, INSERT, DELETE ON buildloop.invocations TO ${fn}` });
   plan.push({ db, sql: `GRANT USAGE ON SEQUENCE buildloop.invocations_id_seq TO ${fn}` });
-  plan.push({ db, sql: `REVOKE ALL ON buildloop.edge_function_secrets FROM ${everyone}` });
+  // `edge.list` runs as the slug (AD-009) and needs the key set, never the
+  // value: a column grant, not a table grant, so `value_enc` stays admin-only (AD-010).
+  plan.push(...secretKeyGrantPlan({ db, slug, everyone }));
   return plan;
 }
 

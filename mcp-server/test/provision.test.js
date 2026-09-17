@@ -92,7 +92,7 @@ test("the auth schema carries the identity the platform signs, and the slug cann
   assert.ok(sql.includes("GRANT INSERT, UPDATE ON auth.users TO alice_authenticated"), "the runtime upserts the caller");
 });
 
-test("the buildloop schema is readable by the slug, writable to invocations by _fn, and its secrets by neither", () => {
+test("the buildloop schema is readable by the slug — the secret key set included, the secret value never", () => {
   const sql = sqlOf(commonPlan({ slug: "alice", fnPassword }));
   const at = (needle) => sql.findIndex((s) => s.includes(needle));
   assert.ok(at("CREATE SCHEMA IF NOT EXISTS buildloop") < at("buildloop.edge_functions"), "schema before its tables");
@@ -106,7 +106,19 @@ test("the buildloop schema is readable by the slug, writable to invocations by _
   );
   assert.ok(sql.includes("GRANT USAGE ON SEQUENCE buildloop.invocations_id_seq TO alice_fn"));
   assert.ok(sql.includes("REVOKE ALL ON buildloop.edge_function_secrets FROM alice, alice_anon, alice_authenticated, alice_fn"));
-  assert.ok(!sql.some((s) => /GRANT[^;]*edge_function_secrets/.test(s)), "nobody but the admin role reads the secrets");
+  assert.ok(sql.includes("GRANT SELECT (name, key) ON buildloop.edge_function_secrets TO alice"), "the slug reads the key set");
+  assert.ok(
+    at("REVOKE ALL ON buildloop.edge_function_secrets") < at("GRANT SELECT (name, key) ON buildloop.edge_function_secrets"),
+    "the revoke must run before the grant, or the grant would be wiped",
+  );
+  assert.ok(
+    !sql.some((s) => /GRANT[^;]*edge_function_secrets/.test(s) && !s.startsWith("GRANT SELECT (name, key)")),
+    "no other grant reaches the secrets table",
+  );
+  assert.ok(!sql.some((s) => /GRANT[^;]*edge_function_secrets[^;]*value_enc/.test(s)), "value_enc is never granted");
+  for (const other of ["alice_anon", "alice_authenticated", "alice_fn"]) {
+    assert.ok(!sql.some((s) => s.includes("edge_function_secrets") && s.startsWith("GRANT") && s.includes(other)), other);
+  }
 });
 
 test("the upgrade of a migrated database creates no database and does not touch the collaborator's own role", () => {
