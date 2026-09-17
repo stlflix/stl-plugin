@@ -74,6 +74,20 @@ O runtime é igual, com `fn-src`, `stl-buildloop-functions` e
 `FUNCTIONS_IMAGE_TAG`. Se a variável não estiver no `.env`, o compose usa o
 padrão que está escrito nele (`0.4.0` / `0.1.0`).
 
+## Atualizar so o compose (sem imagem nova)
+
+Mudou o `docker-compose.yml` (ex.: um tmpfs, um limite, um label) mas nenhum
+Dockerfile mudou: nao precisa rebuild, so recriar o container com o compose
+novo.
+
+```bash
+scp ops/buildloop/docker-compose.yml mkt-vps:/home/ubuntu/buildloop/docker-compose.yml
+ssh mkt-vps 'cd /home/ubuntu/buildloop && docker compose up -d functions'
+```
+
+`docker compose up -d <servico>` recria só o container daquele serviço com a
+config nova; os outros ficam de pé.
+
 ## Backfill do grant de chave de secret (AD-010)
 
 Banco provisionado antes do AD-010 nao tem o `GRANT SELECT (name, key)` em
