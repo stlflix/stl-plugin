@@ -18,6 +18,12 @@ import { list } from "../src/edge.js";
  * The refusals match `table|column`: with a column grant in place Postgres may
  * name either, and which sentence it picks is not the behaviour under test —
  * that the read is refused at all is.
+ *
+ * `_anon` and `_authenticated` are refused one layer earlier, on the schema:
+ * `provision.js` grants `USAGE ON SCHEMA buildloop` to the slug and to `_fn`
+ * only (`_fn` needs `buildloop.invocations`), so an execution role never gets
+ * far enough to be told about a table. That is a stronger denial, not a weaker
+ * one, and the assertions name which one each role must hit.
  */
 const CONTAINER = "stl-buildloop-edge-it";
 const IMAGE = "postgres:16";
@@ -148,26 +154,24 @@ test("the slug cannot SELECT * off edge_function_secrets", { skip }, async () =>
 
 test("none of the execution roles (_anon, _authenticated, _fn) can read even the key column", { skip }, async () => {
   await as(`${ALICE.slug}_fn`, ALICE.fnPassword, databaseNameFor(ALICE.slug), async (client) => {
+    // `_fn` holds USAGE on the schema (it writes `buildloop.invocations`), so
+    // its refusal is the table/column one.
     await assert.rejects(
       client.query("SELECT key FROM buildloop.edge_function_secrets"),
       /permission denied for (table|column)[^\n]*edge_function_secrets/i,
       "_fn",
     );
 
-    await client.query(`SET ROLE ${ALICE.slug}_anon`);
-    await assert.rejects(
-      client.query("SELECT key FROM buildloop.edge_function_secrets"),
-      /permission denied for (table|column)[^\n]*edge_function_secrets/i,
-      "_anon",
-    );
-    await client.query("RESET ROLE");
-
-    await client.query(`SET ROLE ${ALICE.slug}_authenticated`);
-    await assert.rejects(
-      client.query("SELECT key FROM buildloop.edge_function_secrets"),
-      /permission denied for (table|column)[^\n]*edge_function_secrets/i,
-      "_authenticated",
-    );
-    await client.query("RESET ROLE");
+    // `_anon` and `_authenticated` hold no USAGE on `buildloop` at all: the
+    // schema closes before the table is ever named.
+    for (const role of [`${ALICE.slug}_anon`, `${ALICE.slug}_authenticated`]) {
+      await client.query(`SET ROLE ${role}`);
+      await assert.rejects(
+        client.query("SELECT key FROM buildloop.edge_function_secrets"),
+        /permission denied for schema buildloop/i,
+        role,
+      );
+      await client.query("RESET ROLE");
+    }
   });
 });
